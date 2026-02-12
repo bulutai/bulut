@@ -21,10 +21,17 @@ import {
   COLORS,
   TRANSITIONS,
   BORDER_RADIUS,
-  getContrastIconFilter,
+  SHADOW,
 } from "../styles/constants";
-import { closeIconUrl, microphoneIconUrl, restartIconUrl } from "../assets";
+import {
+  closeIconContent,
+  microphoneIconContent,
+  restartIconContent,
+  logoContent,
+} from "../assets";
 import { StreamingJsonParser } from "../utils/streamingJson";
+
+import { SvgIcon } from "./SvgIcon";
 
 interface ChatWindowProps {
   onClose: () => void;
@@ -224,12 +231,12 @@ export const ChatWindow = ({
   const sessionIdRef = useRef<string | null>(
     typeof localStorage !== "undefined"
       ? (() => {
-        const ts = localStorage.getItem(TIMESTAMP_KEY);
-        if (ts && Date.now() - parseInt(ts, 10) < TTL_MS) {
-          return localStorage.getItem(SESSION_ID_KEY);
-        }
-        return null;
-      })()
+          const ts = localStorage.getItem(TIMESTAMP_KEY);
+          if (ts && Date.now() - parseInt(ts, 10) < TTL_MS) {
+            return localStorage.getItem(SESSION_ID_KEY);
+          }
+          return null;
+        })()
       : null,
   );
 
@@ -357,7 +364,7 @@ export const ChatWindow = ({
     }
 
     if (audioContextRef.current) {
-      audioContextRef.current.close().catch(() => { });
+      audioContextRef.current.close().catch(() => {});
       audioContextRef.current = null;
     }
 
@@ -494,7 +501,11 @@ export const ChatWindow = ({
         call: AgentToolCallInfo,
       ): Promise<{ call_id: string; result: string }> => {
         const toolCall: ToolCallWithId = {
-          tool: call.tool as "navigate" | "getPageContext" | "interact" | "scroll",
+          tool: call.tool as
+            | "navigate"
+            | "getPageContext"
+            | "interact"
+            | "scroll",
           call_id: call.call_id,
           ...call.args,
         } as ToolCallWithId;
@@ -571,15 +582,22 @@ export const ChatWindow = ({
             setIsThinking(false);
             setIsRenderingAudio(true);
 
-            const finalDisplayText = assistantText || pendingAssistantTextRef.current;
+            const finalDisplayText =
+              assistantText || pendingAssistantTextRef.current;
 
             streamingJsonParserRef.current = null;
             pendingAssistantTextRef.current = finalDisplayText;
 
             if (assistantMessageIdRef.current !== null) {
-              updateMessageText(assistantMessageIdRef.current, finalDisplayText);
+              updateMessageText(
+                assistantMessageIdRef.current,
+                finalDisplayText,
+              );
             } else {
-              assistantMessageIdRef.current = appendMessage(finalDisplayText, false);
+              assistantMessageIdRef.current = appendMessage(
+                finalDisplayText,
+                false,
+              );
             }
           },
           onToolCalls: (calls) => {
@@ -644,7 +662,6 @@ export const ChatWindow = ({
       /* if (pendingUserTextRef.current || pendingAssistantTextRef.current) {
          // flushPendingMessages(); // Removed as we stream now
       } */
-
     } catch (error) {
       // Error already shown via onError callback — don't duplicate
       awaitingAssistantResponseRef.current = false;
@@ -671,7 +688,9 @@ export const ChatWindow = ({
           isBusyRef.current,
         )
       ) {
-        console.info("[Bulut] chat-window auto-listen trigger after stream completion");
+        console.info(
+          "[Bulut] chat-window auto-listen trigger after stream completion",
+        );
         void startRecording("vad");
       }
     }
@@ -999,14 +1018,14 @@ export const ChatWindow = ({
     width: `${WINDOW_WIDTH}px`,
     maxHeight: `${WINDOW_HEIGHT}px`,
     backgroundColor: "hsla(0, 0%, 100%, 1)",
-    border: "1px solid rgba(0, 0, 0, 0.1)",
+    border: "1px solid rgba(0, 0, 0, 0.2)",
     borderRadius: BORDER_RADIUS.window,
     display: "flex",
     flexDirection: "column",
     overflow: "hidden",
     zIndex: "10000",
     animation: `slideIn ${TRANSITIONS.medium}`,
-    boxShadow: "0 10px 35px rgba(0, 0, 0, 0.18)",
+    boxShadow: SHADOW
   };
 
   const headerStyle: { [key: string]: string } = {
@@ -1014,14 +1033,6 @@ export const ChatWindow = ({
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    borderBottom: "1px solid rgba(0,0,0,0.06)",
-  };
-
-  const titleStyle: { [key: string]: string } = {
-    margin: "0",
-    fontSize: "18px",
-    fontWeight: "600",
-    color: COLORS.text,
   };
 
   const headerActionsStyle: { [key: string]: string } = {
@@ -1043,40 +1054,32 @@ export const ChatWindow = ({
     transition: `color ${TRANSITIONS.fast}, background-color ${TRANSITIONS.fast}`,
   };
 
-  const headerIconStyle: { [key: string]: string } = {
-    display: "block",
-    height: "20px",
-    width: "16px",
-  };
-
   const messagesContainerStyle: { [key: string]: string } = {
-    flex: "1",
-    padding: "10px 16px",
+    padding: "0px 16px",
     overflowY: "auto",
   };
 
   const messagesListStyle: { [key: string]: string } = {
     display: "flex",
     flexDirection: "column",
-    gap: "14px",
+    gap: "8px",
   };
 
   const messageStyle = (isUser: boolean): { [key: string]: string } => ({
     maxWidth: "84%",
-    padding: isUser ? "9px 14px" : "9px 10px",
+    padding: isUser ? "9px 14px" : "9px 0px",
     borderRadius: BORDER_RADIUS.message,
     fontSize: "14px",
-    lineHeight: "1.45",
+    lineHeight: "1.3",
     wordWrap: "break-word",
     whiteSpace: "pre-wrap",
     alignSelf: isUser ? "flex-end" : "flex-start",
-    backgroundColor: isUser ? COLORS.messageUser : "rgba(0, 0, 0, 0.04)",
-    color: isUser ? COLORS.messageUserText : COLORS.text,
+    backgroundColor: isUser ? COLORS.messageUser : "",
+    color: isUser ? COLORS.messageUserText : "hsla(0, 0%, 10%, 0.8)",
   });
 
   const footerStyle: { [key: string]: string } = {
     padding: "10px 12px",
-    borderTop: "1px solid rgba(0,0,0,0.06)",
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
@@ -1095,6 +1098,7 @@ export const ChatWindow = ({
     whiteSpace: "nowrap",
     overflow: "hidden",
     textOverflow: "ellipsis",
+    opacity: "0.7",
   };
 
   const footerActionsStyle: { [key: string]: string } = {
@@ -1118,18 +1122,13 @@ export const ChatWindow = ({
     width: "37px",
     height: "37px",
     borderRadius: "999px",
-    border: "none",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     cursor: "pointer",
     color: "#ffffff",
-    background: micBackgroundColor,
+    border: "1px solid" + micBackgroundColor,
     transition: `background-color ${TRANSITIONS.fast}, transform ${TRANSITIONS.fast}`,
-  };
-
-  const micIconStyle: { [key: string]: string } = {
-    filter: getContrastIconFilter(micBackgroundColor),
   };
 
   const disableMicControl = isBusy;
@@ -1149,7 +1148,6 @@ export const ChatWindow = ({
         }
 
         .bulut-header-btn:hover:not(:disabled) {
-          background-color: rgba(0, 0, 0, 0.06);
           color: ${COLORS.text};
         }
 
@@ -1166,7 +1164,12 @@ export const ChatWindow = ({
       `}</style>
 
       <div style={headerStyle}>
-        <h3 style={titleStyle}>Bulut</h3>
+        <SvgIcon
+          src={logoContent}
+          title="Bulut Logo"
+          style={{ maxWidth: "80px", height: "auto" }}
+          stripColors={false}
+        />
         <div style={headerActionsStyle}>
           <button
             type="button"
@@ -1176,31 +1179,27 @@ export const ChatWindow = ({
             aria-label="Sohbeti yeniden başlat"
             title="Sohbeti yeniden başlat"
           >
-            <img
-              src={restartIconUrl}
-              alt=""
-              aria-hidden="true"
-              style={headerIconStyle}
-            />
+            <SvgIcon src={restartIconContent} width={22} />
           </button>
 
           <button
             type="button"
             className="bulut-header-btn"
-            style={headerButtonStyle}
+            style={{
+              ...headerButtonStyle,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
             onClick={onClose}
             aria-label="Sohbeti kapat"
             title="Sohbeti kapat"
           >
-            <img
-              src={closeIconUrl}
-              alt=""
-              aria-hidden="true"
-              style={{
-                ...headerIconStyle,
-                marginTop: "1px",
-
-              }}
+            <SvgIcon
+              fill-opacity={"0"}
+              stroke={"currentColor"}
+              src={closeIconContent}
+              width={22}
             />
           </button>
         </div>
@@ -1234,7 +1233,7 @@ export const ChatWindow = ({
       </div>
 
       <div style={footerStyle}>
-        <div style={statusPanelStyle} title={statusText}>
+        <div style={{ ...statusPanelStyle, opacity: statusText === "Hazır" ? 0 : 1 , transition: "opacity 0.2s ease-out"}} title={statusText}>
           {statusText}
         </div>
 
@@ -1259,11 +1258,11 @@ export const ChatWindow = ({
                 : "Dokun: VAD, Basılı tut: bırakınca gönder"
             }
           >
-            <img
-              src={microphoneIconUrl}
-              alt=""
-              aria-hidden="true"
-              style={micIconStyle}
+            <SvgIcon
+              fill-opacity={"0"}
+              stroke={"black"}
+              src={microphoneIconContent}
+              width={22}
             />
           </button>
         </div>

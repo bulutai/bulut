@@ -554,11 +554,19 @@ const BulutWidget = ({ config }: BulutWidgetProps) => {
 };
 
 const SHADOW_STYLE = `
+  @font-face {
+    font-family: "Clash Display";
+    src: url("https://bulut.lu/clash-display.woff2") format("woff2");
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+  }
+
   :host {
     all: initial;
     contain: layout style paint;
     color: #111111;
-    font-family: inherit;
+    font-family: "Clash Display", sans-serif;
     font-size: 16px;
     line-height: 1.4;
     -webkit-font-smoothing: antialiased;

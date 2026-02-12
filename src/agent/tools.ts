@@ -415,7 +415,6 @@ const ensureCursor = (): HTMLElement => {
   const baseColor = COLORS.primary;
   cursor.style.background = baseColor;
   cursor.style.border = "2px solid #ffffff";
-  cursor.style.boxShadow = `0 0 0 6px ${baseColor}33`;
   cursor.style.zIndex = "2147483647";
   cursor.style.pointerEvents = "none";
   cursor.style.transform = "translate(-50%, -50%)";
@@ -443,9 +442,43 @@ const getElementCenter = (element: HTMLElement): { x: number; y: number } => {
   };
 };
 
+const CONTAINS_SELECTOR_PATTERN = /^(.*?):contains\((['"])(.*?)\2\)\s*$/;
+
+const findElementBySelector = (selector: string): Element | null => {
+  try {
+    return document.querySelector(selector);
+  } catch (error) {
+    const containsMatch = selector.match(CONTAINS_SELECTOR_PATTERN);
+    if (!containsMatch) {
+      console.warn(`AuticBot selector invalid: ${selector}`, error);
+      return null;
+    }
+
+    const baseSelector = containsMatch[1]?.trim() || "*";
+    const expectedText = containsMatch[3]?.trim() || "";
+    if (!expectedText) {
+      console.warn(`AuticBot selector contains empty text: ${selector}`);
+      return null;
+    }
+
+    try {
+      const candidates = document.querySelectorAll(baseSelector);
+      for (const candidate of candidates) {
+        if (candidate.textContent?.includes(expectedText)) {
+          return candidate;
+        }
+      }
+      return null;
+    } catch (fallbackError) {
+      console.warn(`AuticBot selector fallback invalid: ${selector}`, fallbackError);
+      return null;
+    }
+  }
+};
+
 const resolveTarget = (call: InteractToolCall): ResolvedTarget | null => {
   if (call.selector) {
-    const selected = document.querySelector(call.selector);
+    const selected = findElementBySelector(call.selector);
 
     if (selected instanceof HTMLElement) {
       const center = getElementCenter(selected);
@@ -559,7 +592,7 @@ const slowScrollElementIntoViewWithMode = async (
 };
 
 const executeScroll = async (call: ScrollToolCall) => {
-  const selected = document.querySelector(call.selector);
+  const selected = findElementBySelector(call.selector);
   if (!(selected instanceof HTMLElement)) {
     console.warn(`AuticBot scroll: selector not found: ${call.selector}`);
     return;
@@ -834,9 +867,9 @@ export const executeToolCalls = async (toolCalls: AgentToolCall[]) => {
 
 // ── Agent-mode tool execution (returns results) ─────────────────────
 
-export interface ToolCallWithId extends AgentToolCall {
+export type ToolCallWithId = AgentToolCall & {
   call_id: string;
-}
+};
 
 export interface ToolCallResult {
   call_id: string;
@@ -850,19 +883,20 @@ export interface ToolCallResult {
 export const executeSingleToolCall = async (
   call: ToolCallWithId,
 ): Promise<ToolCallResult> => {
+  const callId = call.call_id;
   try {
     if (call.tool === "interact") {
-      await executeInteract(call as unknown as InteractToolCall);
+      await executeInteract(call);
       return {
-        call_id: call.call_id,
-        result: `Etkileşim başarılı: ${(call as unknown as InteractToolCall).action}`,
+        call_id: callId,
+        result: `Etkileşim başarılı: ${call.action}`,
       };
     }
 
     if (call.tool === "scroll") {
-      await executeScroll(call as unknown as ScrollToolCall);
+      await executeScroll(call);
       return {
-        call_id: call.call_id,
+        call_id: callId,
         result: "Öğeye kaydırma başarılı.",
       };
     }
@@ -870,27 +904,27 @@ export const executeSingleToolCall = async (
     if (call.tool === "getPageContext") {
       const context = getPageContext();
       return {
-        call_id: call.call_id,
+        call_id: callId,
         result: context.summary,
       };
     }
 
     if (call.tool === "navigate") {
-      await executeNavigate(call as unknown as NavigateToolCall);
+      await executeNavigate(call);
       // Wait for navigation / SPA routing to settle
       await new Promise((resolve) => setTimeout(resolve, 1500));
       const context = getPageContext();
       return {
-        call_id: call.call_id,
+        call_id: callId,
         result: `Navigasyon tamamlandı. Şu anki sayfa: ${window.location.href}\nSayfa bağlamı: ${context.summary}`,
       };
     }
 
-    return { call_id: call.call_id, result: "Bilinmeyen araç." };
+    return { call_id: callId, result: "Bilinmeyen araç." };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     console.warn(`[Autic] Tool execution error: ${call.tool}`, error);
-    return { call_id: call.call_id, result: `Hata: ${msg}` };
+    return { call_id: callId, result: `Hata: ${msg}` };
   }
 };
 

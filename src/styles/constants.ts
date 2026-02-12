@@ -9,13 +9,12 @@ export const POSITION_RIGHT = 20;
 
 // Colors
 export const COLORS = {
-  primary: "#6C03C1",
-  primaryHover: "#6C03C1",
+  primary: "#006BF8",
+  primaryHover: "#0056C7",
   background: "#ffffff",
   text: "#1F1F1F",
   textSecondary: "#1F1F1F",
   border: "#e5e7eb",
-  shadow: "rgba(0, 0, 0, 0.15)",
   messageBot: "",
   messageUser: "#6C03C1",
   messageUserText: "#ffffff",
@@ -50,14 +49,11 @@ export const getContrastIconFilter = (backgroundHex: string): string => {
 export const BORDER_RADIUS = {
   button: '50%',
   window: '17px',
-  message: '17px'
+  message: '14px'
 };
 
 // Shadows
-export const SHADOWS = {
-  button: '0 4px 12px rgba(0, 0, 0, 0.15)',
-  window: '0 8px 32px rgba(0, 0, 0, 0.12)'
-};
+export const SHADOW = "0 0 15px rgba(0, 0, 0, 0.15)";
 
 // Transitions
 export const TRANSITIONS = {

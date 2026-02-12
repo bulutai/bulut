@@ -1,5 +1,18 @@
-import { BUTTON_SIZE, POSITION_BOTTOM, POSITION_RIGHT, COLORS, SHADOWS, TRANSITIONS, BORDER_RADIUS, getContrastIconFilter } from '../styles/constants';
-import { microphoneIconUrl, closeIconUrl } from "../assets";
+import {
+  BUTTON_SIZE,
+  POSITION_BOTTOM,
+  POSITION_RIGHT,
+  COLORS,
+  SHADOW,
+  TRANSITIONS,
+  BORDER_RADIUS,
+  getContrastIconFilter,
+} from "../styles/constants";
+import {
+  closeIconContent,
+  microphoneIconContent,
+} from "../assets";
+import { SvgIcon } from "./SvgIcon";
 
 interface ChatButtonProps {
   onMicClick: () => void;
@@ -50,21 +63,20 @@ export const ChatButton = ({
     height: `${BUTTON_SIZE}px`,
     borderRadius: BORDER_RADIUS.button,
     backgroundColor: bgColor,
-    color: '#ffffff',
-    border: 'none',
-    cursor: 'pointer',
-    boxShadow: SHADOWS.button,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
+    color: "#ffffff",
+    border: "none",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
     transition: `background-color ${TRANSITIONS.fast}, transform ${TRANSITIONS.fast}`,
-    position: "relative"
+    position: "relative",
   };
 
   const iconStyle: { [key: string]: string } = {
-    width: '24px',
-    height: '24px',
-    display: 'block',
+    width: "24px",
+    height: "24px",
+    display: "block",
     filter: getContrastIconFilter(bgColor),
   };
 
@@ -78,22 +90,22 @@ export const ChatButton = ({
 
   // Shared close button style
   const closeBtnStyle: { [key: string]: string } = {
-    position: 'absolute',
-    top: '6px',
-    right: '6px',
-    width: '20px',
-    height: '20px',
-    borderRadius: '50%',
-    border: 'none',
-    background: 'rgba(0,0,0,0.08)',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '12px',
-    lineHeight: '1',
+    position: "absolute",
+    top: "6px",
+    right: "6px",
+    width: "20px",
+    height: "20px",
+    borderRadius: "50%",
+    border: "none",
+    background: "rgba(0,0,0,0.08)",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: "12px",
+    lineHeight: "1",
     color: COLORS.text,
-    padding: '0',
+    padding: "0",
   };
 
   const renderPopup = (
@@ -105,7 +117,7 @@ export const ChatButton = ({
   ) => (
     <div
       className={`bulut-popup ${extraClass}`}
-      style={{ cursor: 'pointer' }}
+      style={{ cursor: "pointer" }}
       onClick={onClick}
     >
       {/* Close button */}
@@ -119,16 +131,23 @@ export const ChatButton = ({
           }}
           aria-label="Kapat"
         >
-          ×
+          <SvgIcon
+            strokeWidth={3}
+            src={closeIconContent}
+            stroke={"currentColor"}
+            height={14}
+          />
         </button>
       )}
 
       {/* Text content */}
-      <div style={{
-        paddingRight: onClose ? '22px' : '0',
-        wordBreak: 'break-word',
-        ...(scrollable ? { maxHeight: '96px', overflowY: 'auto' } : {}),
-      }}>
+      <div
+        style={{
+          paddingRight: onClose ? "22px" : "0",
+          wordBreak: "break-word",
+          ...(scrollable ? { maxHeight: "96px", overflowY: "auto" } : {}),
+        }}
+      >
         {content}
       </div>
     </div>
@@ -144,9 +163,10 @@ export const ChatButton = ({
           border-radius: 12px;
           font-size: 13px;
           line-height: 1.4;
-          filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.15));
           position: relative;
           overflow: visible;
+          box-shadow: ${SHADOW};
+          border: 1px solid ${COLORS.border};
         }
         .bulut-popup-bubble {
           animation: bulut-bubbleIn 400ms ease-out;
@@ -186,15 +206,16 @@ export const ChatButton = ({
       <div style={containerStyle}>
         <div style={controlsRowStyle}>
           {/* Welcome bubble */}
-          {showBubble && !isRecording && !previewMessage &&
+          {showBubble &&
+            !isRecording &&
+            !previewMessage &&
             renderPopup(
-              'Destek lazımsa hemen konuşmaya başlayabiliriz!',
+              "Destek lazımsa hemen konuşmaya başlayabiliriz!",
               onBubbleClick,
               null,
-              'bulut-popup-bubble',
+              "bulut-popup-bubble",
               false,
-            )
-          }
+            )}
 
           {/* New-message preview */}
           {previewMessage &&
@@ -202,10 +223,9 @@ export const ChatButton = ({
               previewMessage,
               onPreviewClick,
               onPreviewClose,
-              'bulut-popup-preview',
+              "bulut-popup-preview",
               true,
-            )
-          }
+            )}
 
           {/* Main mic / cancel button */}
           <button
@@ -214,46 +234,51 @@ export const ChatButton = ({
             onMouseEnter={(e) => {
               Object.assign(e.currentTarget.style, {
                 backgroundColor: COLORS.primaryHover,
-                transform: 'scale(1.05)',
+                transform: "scale(1.05)",
               });
             }}
             onMouseLeave={(e) => {
               Object.assign(e.currentTarget.style, {
-                backgroundColor: bgColor,
-                transform: 'scale(1)',
+
+                transform: "scale(1)",
               });
             }}
-            aria-label={isRecording ? 'Kaydı iptal et' : 'Konuşmaya başla'}
+            aria-label={isRecording ? "Kaydı iptal et" : "Konuşmaya başla"}
           >
             <span
               onClick={(event) => {
                 event.stopPropagation();
                 onAccessibilityToggle();
               }}
-              title={accessibilityEnabled ? "Sesli mod açık" : "Sesli mod kapalı"}
-              aria-label={accessibilityEnabled ? "Sesli modu kapat" : "Sesli modu aç"}
+              title={
+                accessibilityEnabled ? "Sesli mod açık" : "Sesli mod kapalı"
+              }
+              aria-label={
+                accessibilityEnabled ? "Sesli modu kapat" : "Sesli modu aç"
+              }
               style={{
                 position: "absolute",
-                top: "2px",
-                right: "2px",
+                top: "3px",
+                right: "3px",
                 width: "15px",
                 height: "15px",
                 borderRadius: "50%",
-                border: "1px solid #ffffff",
-                backgroundColor: accessibilityEnabled ? "#22c55e" : "rgba(255,255,255,0.35)",
-                boxShadow: "0 0 0 1px rgba(0,0,0,0.18)",
+                border: `2px solid ${accessibilityEnabled ? "white" : COLORS.primaryHover}`,
+                backgroundColor: accessibilityEnabled
+                  ? COLORS.primaryHover
+                  : "rgba(255,255,255,1)",
                 cursor: "pointer",
               }}
             />
-            <img
-              src={isRecording ? closeIconUrl : microphoneIconUrl}
-              alt=""
+            <SvgIcon
+              src={isRecording ? closeIconContent : microphoneIconContent}
               aria-hidden="true"
+              fill-opacity={0}
+              stroke={"currentColor"}
               style={iconStyle}
             />
           </button>
         </div>
-
       </div>
     </>
   );
