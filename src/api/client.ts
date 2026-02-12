@@ -41,7 +41,14 @@ export type AudioStreamState = "rendering" | "playing" | "done" | "fallback";
 export const TTS_WS_RETRY_DELAYS_MS = [250, 750, 1500];
 const FORCED_TTS_VOICE = "zeynep";
 
-const normalizeBaseUrl = (baseUrl: string) => baseUrl.replace(/\/+$/, "");
+const normalizeBaseUrl = (baseUrl: string): string => {
+  const trimmed = baseUrl.trim().replace(/\/+$/, "");
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  // Treat host-only values like "api.bulut.lu" as HTTPS absolute URLs.
+  return `https://${trimmed}`;
+};
 const toWebSocketUrl = (baseUrl: string, path: string): string => {
   const normalized = normalizeBaseUrl(baseUrl);
   const url = new URL(normalized);

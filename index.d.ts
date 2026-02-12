@@ -3,8 +3,6 @@ export type BulutVoice = 'zeynep' | 'ali';
 export interface BulutProps {
   /** The project ID for your Bulut instance (required). */
   projectId: string;
-  /** Backend API URL. Defaults to `"http://localhost:8000"`. */
-  backendBaseUrl?: string;
   /** LLM model identifier. */
   model?: string;
   /** Voice for TTS output. */
