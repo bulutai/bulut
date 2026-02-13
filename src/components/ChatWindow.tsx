@@ -1437,6 +1437,8 @@ export const ChatWindow = ({
   const messagesContainerStyle: { [key: string]: string } = {
     padding: "0px 16px",
     overflowY: "auto",
+    flex: "1",
+    minHeight: "0",
   };
 
   const messagesListStyle: { [key: string]: string } = {
@@ -1515,7 +1517,7 @@ export const ChatWindow = ({
   const disableMicControl = isBusy;
 
   return (
-    <div style={windowStyle}>
+    <div className="bulut-chat-window" style={windowStyle}>
       <style>{`
         @keyframes slideIn {
           from {
@@ -1556,6 +1558,29 @@ export const ChatWindow = ({
           min-width: 12px;
           text-align: left;
         }
+
+        /* Mobile: full-screen chat window */
+        @media (max-width: 600px) {
+          .bulut-chat-window {
+            top: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            bottom: 0 !important;
+            width: 100% !important;
+            max-height: 100% !important;
+            height: 100% !important;
+            border-radius: 0 !important;
+          }
+          .bulut-close-btn {
+            width: 40px !important;
+            height: 40px !important;
+            padding: 8px !important;
+          }
+          .bulut-close-btn svg {
+            width: 26px !important;
+            height: 26px !important;
+          }
+        }
       `}</style>
 
       <div style={headerStyle}>
@@ -1579,7 +1604,7 @@ export const ChatWindow = ({
 
           <button
             type="button"
-            className="bulut-header-btn"
+            className="bulut-header-btn bulut-close-btn"
             style={{
               ...headerButtonStyle,
               display: "flex",

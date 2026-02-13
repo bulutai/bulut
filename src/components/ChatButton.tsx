@@ -59,6 +59,8 @@ export const ChatButton = ({
   const buttonStyle: { [key: string]: string } = {
     width: `${BUTTON_SIZE}px`,
     height: `${BUTTON_SIZE}px`,
+    minWidth: `${BUTTON_SIZE}px`,
+    minHeight: `${BUTTON_SIZE}px`,
     borderRadius: BORDER_RADIUS.button,
     backgroundColor: bgColor,
     color: "#ffffff",
@@ -69,6 +71,7 @@ export const ChatButton = ({
     justifyContent: "center",
     transition: `background-color ${TRANSITIONS.fast}, transform ${TRANSITIONS.fast}`,
     position: "relative",
+    flexShrink: "0",
   };
 
   const iconStyle: { [key: string]: string } = {
@@ -183,11 +186,19 @@ export const ChatButton = ({
           max-width: 320px;
         }
 
-        /* Mobile: fill available width */
+        /* Mobile: full-width layout with popup filling remaining space */
         @media (max-width: 600px) {
+          .bulut-fab-container:has(.bulut-popup) {
+            left: 16px !important;
+            right: 16px !important;
+          }
+          .bulut-fab-container:has(.bulut-popup) .bulut-controls-row {
+            width: 100%;
+          }
           .bulut-popup {
+            flex: 1;
+            min-width: 0;
             max-width: none;
-            left: 16px;
           }
         }
 
@@ -206,8 +217,8 @@ export const ChatButton = ({
         }
       `}</style>
 
-      <div style={containerStyle}>
-        <div style={controlsRowStyle}>
+      <div className="bulut-fab-container" style={containerStyle}>
+        <div className="bulut-controls-row" style={controlsRowStyle}>
           {/* Welcome bubble */}
           {showBubble &&
             !isRecording &&
