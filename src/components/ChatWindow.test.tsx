@@ -102,7 +102,7 @@ describe("status and timer helpers", () => {
         isPlayingAudio: false,
         isRunningTools: false,
       }),
-    ).toBe("Düşünüyor...");
+    ).toBe("Düşünüyor");
 
     expect(
       resolveStatusText({

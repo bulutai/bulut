@@ -30,6 +30,7 @@ import {
   closeIconContent,
   completedSfxUrl,
   microphoneIconContent,
+  stopIconContent,
   sentSfxUrl,
   thinkingSfxUrl,
   restartIconContent,
@@ -40,11 +41,22 @@ import { StreamingJsonParser } from "../utils/streamingJson";
 
 import { SvgIcon } from "./SvgIcon";
 
+export interface ChatWindowHandle {
+  startRecording: () => void;
+  cancelRecording: () => void;
+  stopTask: () => void;
+}
+
 interface ChatWindowProps {
   onClose: () => void;
   config: BulutRuntimeConfig;
   accessibilityMode?: boolean;
   onAccessibilityToggle?: () => void;
+  hidden?: boolean;
+  actionsRef?: { current: ChatWindowHandle | null };
+  onRecordingChange?: (recording: boolean) => void;
+  onBusyChange?: (busy: boolean) => void;
+  onPreviewChange?: (text: string | null) => void;
 }
 
 interface Message {
@@ -72,10 +84,9 @@ export const HOLD_THRESHOLD_MS = 250;
 const STATUS_LABELS = {
   ready: "Hazır",
   loading: "Yükleniyor",
-  listening: "Dinliyor...",
+  listening: "Dinliyor",
   transcribing: "Metne dönüştürülüyor",
-  thinking: "Düşünüyor...",
-  renderingAudio: "Ses hazırlanıyor",
+  thinking: "Düşünüyor",
   playingAudio: "Ses oynatılıyor",
   runningTools: "Araç çalıştırılıyor",
 } as const;
@@ -106,7 +117,6 @@ export const resolveStatusText = (flags: StatusFlags): string => {
   if (flags.isRecording) return STATUS_LABELS.listening;
   if (flags.isRunningTools) return STATUS_LABELS.runningTools;
   if (flags.isPlayingAudio) return STATUS_LABELS.playingAudio;
-  if (flags.isRenderingAudio) return STATUS_LABELS.renderingAudio;
   if (flags.isThinking) return STATUS_LABELS.thinking;
   if (flags.isTranscribing) return STATUS_LABELS.transcribing;
   if (flags.isBusy) return STATUS_LABELS.loading;
@@ -193,6 +203,11 @@ export const ChatWindow = ({
   config,
   accessibilityMode = false,
   onAccessibilityToggle,
+  hidden = false,
+  actionsRef,
+  onRecordingChange,
+  onBusyChange,
+  onPreviewChange,
 }: ChatWindowProps) => {
   const [messages, setMessages] = useState<Message[]>(() => {
     if (typeof localStorage !== "undefined") {
@@ -267,6 +282,7 @@ export const ChatWindow = ({
   const micPressStartRef = useRef<number | null>(null);
   const micHoldTimeoutRef = useRef<number | null>(null);
   const micHoldTriggeredRef = useRef(false);
+  const recordingModeRef = useRef<RecordingMode | null>(null);
   const pendingStopAfterStartRef = useRef(false);
   const startRecordingPendingRef = useRef(false);
 
@@ -290,6 +306,7 @@ export const ChatWindow = ({
   const sfxDisposedRef = useRef(false);
   const activeSfxAudioRef = useRef<HTMLAudioElement | null>(null);
   const activeSfxResolveRef = useRef<(() => void) | null>(null);
+  const autoListenSuppressedRef = useRef(false);
 
   useEffect(() => {
     isBusyRef.current = isBusy;
@@ -298,6 +315,37 @@ export const ChatWindow = ({
   useEffect(() => {
     isRecordingRef.current = isRecording;
   }, [isRecording]);
+
+  // Report state changes to parent
+  useEffect(() => { onRecordingChange?.(isRecording); }, [isRecording]);
+  useEffect(() => { onBusyChange?.(isBusy); }, [isBusy]);
+
+  // Derive and report preview text to parent
+  useEffect(() => {
+    if (!onPreviewChange) return;
+    if (isRecording) {
+      onPreviewChange(STATUS_LABELS.listening);
+      return;
+    }
+    // When audio is rendering/playing, show the actual message text
+    if (isRenderingAudio || isPlayingAudio) {
+      const lastAssistant = [...messages].reverse().find(m => !m.isUser && m.type !== "tool");
+      onPreviewChange(lastAssistant?.text ?? getGreetingText(config.agentName));
+      return;
+    }
+    if (isBusy || isTranscribing || isThinking || isRunningTools) {
+      const st = statusOverride ?? resolveStatusText({
+        isBusy, isRecording, isTranscribing, isThinking,
+        isRenderingAudio, isPlayingAudio, isRunningTools,
+      });
+      onPreviewChange(st);
+      return;
+    }
+    // Show last assistant message (or greeting)
+    const lastAssistant = [...messages].reverse().find(m => !m.isUser && m.type !== "tool");
+    onPreviewChange(lastAssistant?.text ?? getGreetingText(config.agentName));
+  }, [isRecording, isBusy, isTranscribing, isThinking, isRunningTools,
+      isPlayingAudio, isRenderingAudio, statusOverride, messages]);
 
   const playSfxNow = (name: SfxName): Promise<void> =>
     new Promise((resolve) => {
@@ -671,6 +719,7 @@ export const ChatWindow = ({
         activeStreamControllerRef.current = null;
 
         if (
+          !autoListenSuppressedRef.current &&
           shouldAutoListenAfterAudio(
             accessibilityMode,
             isRecordingRef.current,
@@ -828,6 +877,7 @@ export const ChatWindow = ({
           onAssistantDelta: (delta) => {
             setIsTranscribing(false);
             setIsThinking(true);
+            setIsRunningTools(false);
             if (awaitingAssistantResponseRef.current) {
               awaitingAssistantResponseRef.current = false;
               setStatusOverride(null);
@@ -951,6 +1001,7 @@ export const ChatWindow = ({
       setIsThinking(false);
       setIsRenderingAudio(false);
       setIsPlayingAudio(false);
+      setIsRunningTools(false);
       // Reset for next message cycle
       pendingUserTextRef.current = null;
       pendingAssistantTextRef.current = "";
@@ -959,6 +1010,7 @@ export const ChatWindow = ({
         activeStreamControllerRef.current = null;
       }
       if (
+        !autoListenSuppressedRef.current &&
         shouldAutoListenAfterAudio(
           accessibilityMode,
           isRecordingRef.current,
@@ -1109,6 +1161,7 @@ export const ChatWindow = ({
       recorder.onstop = async () => {
         setIsRecording(false);
         isRecordingRef.current = false;
+        recordingModeRef.current = null;
         stopRecordingTimer();
 
         cleanupVAD();
@@ -1142,6 +1195,7 @@ export const ChatWindow = ({
       }
 
       recorder.start(200);
+      recordingModeRef.current = mode;
       setIsRecording(true);
       isRecordingRef.current = true;
       startRecordingTimer();
@@ -1151,8 +1205,12 @@ export const ChatWindow = ({
         stopRecording();
       }
     } catch (error) {
+      const errMsg = normalizeError(error);
+      if (errMsg.toLowerCase().includes("permission") || errMsg.toLowerCase().includes("denied")) {
+        autoListenSuppressedRef.current = true;
+      }
       setStatusOverride(null);
-      appendMessage(`Mikrofon hatası: ${normalizeError(error)}`, false);
+      appendMessage(`Mikrofon hatası: ${errMsg}`, false);
       cleanupVAD();
       stopStreamTracks();
       pendingStopAfterStartRef.current = false;
@@ -1183,7 +1241,12 @@ export const ChatWindow = ({
     }
 
     if (isRecordingRef.current) {
-      stopRecording();
+      // In VAD mode, tapping the button cancels; in press mode, it sends
+      if (recordingModeRef.current === "vad") {
+        stopRecording({ discard: true });
+      } else {
+        stopRecording();
+      }
       return;
     }
 
@@ -1288,6 +1351,46 @@ export const ChatWindow = ({
     resetProcessingFlags();
   };
 
+  // Auto-listen when accessibility mode is activated (initial trigger)
+  useEffect(() => {
+    if (!accessibilityMode || autoListenSuppressedRef.current) return;
+    const timer = window.setTimeout(() => {
+      if (!isRecordingRef.current && !isBusyRef.current && !startRecordingPendingRef.current && !autoListenSuppressedRef.current) {
+        void startRecording("vad");
+      }
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [accessibilityMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const stopTask = () => {
+    stopActiveStream();
+    stopRecording({ discard: true });
+    cleanupVAD();
+    stopStreamTracks();
+    resetProcessingFlags();
+    setIsBusy(false);
+  };
+
+  // Expose recording actions to parent via actionsRef
+  if (actionsRef) {
+    actionsRef.current = {
+      startRecording: () => {
+        autoListenSuppressedRef.current = false;
+        void startRecording("vad");
+      },
+      cancelRecording: () => {
+        const recorder = recorderRef.current;
+        if (recorder && recorder.state !== "inactive") {
+          stopRecording({ discard: true });
+        } else {
+          cleanupVAD();
+          stopStreamTracks();
+        }
+      },
+      stopTask,
+    };
+  }
+
   const windowStyle: { [key: string]: string } = {
     position: "fixed",
     bottom: `${POSITION_BOTTOM}px`,
@@ -1296,11 +1399,11 @@ export const ChatWindow = ({
     maxHeight: `${WINDOW_HEIGHT}px`,
     backgroundColor: "hsla(0, 0%, 100%, 1)",
     borderRadius: BORDER_RADIUS.window,
-    display: "flex",
+    display: hidden ? "none" : "flex",
     flexDirection: "column",
     overflow: "hidden",
     zIndex: "10000",
-    animation: `slideIn ${TRANSITIONS.medium}`,
+    animation: hidden ? "none" : `slideIn ${TRANSITIONS.medium}`,
     boxShadow: SHADOW,
     fontFamily: "\"Geist\", sans-serif",
   };
@@ -1407,6 +1510,8 @@ export const ChatWindow = ({
     transition: `transform ${TRANSITIONS.fast}`,
   };
 
+  const isVadRecording = isRecording && recordingModeRef.current === "vad";
+  const showStopButton = isBusy && !isRecording;
   const disableMicControl = isBusy;
 
   return (
@@ -1594,28 +1699,48 @@ export const ChatWindow = ({
               {formatDurationMs(recordingDurationMs)}
             </span>
           ) : null}
-          <button
-            type="button"
-            className="bulut-footer-btn"
-            style={micFooterButtonStyle}
-            onPointerDown={handleMicPointerDown}
-            onPointerUp={handleMicPointerUp}
-            onPointerCancel={handleMicPointerCancel}
-            disabled={disableMicControl}
-            aria-label={isRecording ? "Kaydı durdur" : "Kaydı başlat"}
-            title={
-              isRecording
-                ? "Kaydı durdur"
-                : "Dokun: VAD, Basılı tut: bırakınca gönder"
-            }
-          >
-            <SvgIcon
-              fill-opacity={"0"}
-              stroke={"hsla(215, 100%, 5%, 1)"}
-              src={microphoneIconContent}
-              width={22}
-            />
-          </button>
+          {showStopButton ? (
+            <button
+              type="button"
+              className="bulut-footer-btn"
+              style={micFooterButtonStyle}
+              onClick={stopTask}
+              aria-label="Görevi durdur"
+              title="Görevi durdur"
+            >
+              <SvgIcon
+                fill-opacity={"0"}
+                stroke={"hsla(215, 100%, 5%, 1)"}
+                src={stopIconContent}
+                width={22}
+              />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="bulut-footer-btn"
+              style={micFooterButtonStyle}
+              onPointerDown={handleMicPointerDown}
+              onPointerUp={handleMicPointerUp}
+              onPointerCancel={handleMicPointerCancel}
+              disabled={disableMicControl}
+              aria-label={isVadRecording ? "Kaydı iptal et" : isRecording ? "Kaydı durdur" : "Kaydı başlat"}
+              title={
+                isVadRecording
+                  ? "Kaydı iptal et"
+                  : isRecording
+                    ? "Kaydı durdur"
+                    : "Dokun: VAD, Basılı tut: bırakınca gönder"
+              }
+            >
+              <SvgIcon
+                fill-opacity={"0"}
+                stroke={"hsla(215, 100%, 5%, 1)"}
+                src={isVadRecording ? closeIconContent : microphoneIconContent}
+                width={22}
+              />
+            </button>
+          )}
         </div>
       </div>
     </div>

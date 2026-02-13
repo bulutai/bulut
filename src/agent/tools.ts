@@ -455,6 +455,8 @@ const applyStoredCursorStateForCurrentUrl = (cursor: HTMLElement) => {
 const ensureCursor = (): HTMLElement => {
   const existing = document.getElementById(AGENT_CURSOR_ID);
   if (existing) {
+    // Keep cursor color in sync with the current theme
+    existing.style.background = COLORS.primary;
     initializeCursorHoverTracking();
     return existing as HTMLElement;
   }

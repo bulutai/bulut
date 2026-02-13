@@ -1,26 +1,12 @@
-import { useState, useEffect, useRef } from "preact/hooks";
+import { useState, useEffect, useRef, useCallback } from "preact/hooks";
 import "./globals.css";
 import { render } from "preact";
 import { ChatButton } from "./components/ChatButton";
 import {
   ChatWindow,
-  createInitialMessages,
-  getGreetingText,
+  type ChatWindowHandle,
 } from "./components/ChatWindow";
 import { COLORS } from "./styles/constants";
-import {
-  agentVoiceChatStream,
-  type StreamController,
-  type AgentToolCallInfo,
-} from "./api/client";
-import { getPageContext } from "./agent/context";
-import { executeSingleToolCall, type ToolCallWithId } from "./agent/tools";
-import {
-  sentSfxUrl,
-  thinkingSfxUrl,
-  toolCallSfxUrl,
-  completedSfxUrl,
-} from "./assets";
 
 export type BulutVoice = "zeynep" | "ali";
 
@@ -129,12 +115,7 @@ interface BulutWidgetProps {
   config: BulutRuntimeConfig;
 }
 
-const CHAT_STORAGE_KEY = "bulut_chat_history";
-const CHAT_TIMESTAMP_KEY = "bulut_chat_timestamp";
-const SESSION_ID_KEY = "bulut_session_id";
 const ACCESSIBILITY_MODE_KEY = "bulut_accessibility_mode_enabled";
-const VAD_THRESHOLD = 0.06;
-const SILENCE_DURATION_MS = 1000;
 const GEIST_FONT_FAMILY = "Geist";
 const GEIST_STYLESHEET_ID = "bulut-geist-font-stylesheet";
 const GEIST_STYLESHEET_URL =
@@ -152,44 +133,6 @@ const ensureGeistStylesheet = (): void => {
   link.rel = "stylesheet";
   link.href = GEIST_STYLESHEET_URL;
   document.head.appendChild(link);
-};
-
-interface StoredMessage {
-  id: number;
-  text: string;
-  isUser: boolean;
-}
-
-const appendToStoredMessages = (text: string, isUser: boolean, agentName: string = DEFAULT_AGENT_NAME): number => {
-  let messages: StoredMessage[] = [];
-  if (typeof localStorage !== "undefined") {
-    const saved = localStorage.getItem(CHAT_STORAGE_KEY);
-    if (saved) {
-      try { messages = JSON.parse(saved); } catch { /* ignore */ }
-    }
-  }
-  if (messages.length === 0) {
-    messages = createInitialMessages(agentName);
-  }
-  const id = messages.reduce((a, m) => Math.max(a, m.id), 0) + 1;
-  messages.push({ id, text, isUser });
-  if (typeof localStorage !== "undefined") {
-    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages));
-    localStorage.setItem(CHAT_TIMESTAMP_KEY, Date.now().toString());
-  }
-  return id;
-};
-
-const updateStoredMessage = (id: number, text: string) => {
-  if (typeof localStorage === "undefined") return;
-  const saved = localStorage.getItem(CHAT_STORAGE_KEY);
-  if (!saved) return;
-  try {
-    const messages = JSON.parse(saved) as StoredMessage[];
-    const updated = messages.map((m: StoredMessage) => (m.id === id ? { ...m, text } : m));
-    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(updated));
-    localStorage.setItem(CHAT_TIMESTAMP_KEY, Date.now().toString());
-  } catch { /* ignore */ }
 };
 
 const BulutWidget = ({ config }: BulutWidgetProps) => {
@@ -233,54 +176,30 @@ const BulutWidget = ({ config }: BulutWidgetProps) => {
   });
 
   const [showBubble, setShowBubble] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
   const [isAccessibilityEnabled, setIsAccessibilityEnabled] = useState(() => {
     if (typeof localStorage === "undefined") {
       return false;
     }
     return localStorage.getItem(ACCESSIBILITY_MODE_KEY) === "true";
   });
+
+  // State reported by ChatWindow
+  const [isRecording, setIsRecording] = useState(false);
+  const [isBusy, setIsBusy] = useState(false);
   const [previewMessage, setPreviewMessage] = useState<string | null>(null);
-  const accessibilityMode = isAccessibilityEnabled && !isOpen;
+  const [previewDismissed, setPreviewDismissed] = useState(false);
 
-  // Set initial preview message once config is ready
-  useEffect(() => {
-    if (!configReady) return;
-    setPreviewMessage(getGreetingText(liveConfig.agentName));
-  }, [configReady, liveConfig.agentName]);
+  // Ref for delegating recording to ChatWindow
+  const chatActionsRef = useRef<ChatWindowHandle | null>(null);
 
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const audioChunksRef = useRef<BlobPart[]>([]);
-  const activeControllerRef = useRef<StreamController | null>(null);
-  const previewTimerRef = useRef<number | null>(null);
-  const silenceStartRef = useRef<number | null>(null);
-  const vadIntervalRef = useRef<number | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const isRecordingRef = useRef(false);
-  const isProcessingRef = useRef(false);
-  const autoListenSuppressedRef = useRef(false);
-  const assistantMsgIdRef = useRef<number | null>(null);
-
-  // Simple SFX helper for button-mode audio feedback
-  const SFX_URLS: Record<string, string> = {
-    sent: sentSfxUrl,
-    thinking: thinkingSfxUrl,
-    toolCall: toolCallSfxUrl,
-    completed: completedSfxUrl,
-  };
-
-  const playSfx = (name: string) => {
-    const url = SFX_URLS[name];
-    if (!url || typeof window === "undefined") return;
-    const audio = new Audio(url);
-    void audio.play().catch(() => {});
-  };
+  const handlePreviewChange = useCallback((text: string | null) => {
+    setPreviewMessage(text);
+    if (text !== null) setPreviewDismissed(false);
+  }, []);
 
   // Show welcome bubble once for 5 seconds
   useEffect(() => {
-    if (accessibilityMode) {
+    if (isAccessibilityEnabled) {
       setShowBubble(false);
       return;
     }
@@ -297,289 +216,10 @@ const BulutWidget = ({ config }: BulutWidgetProps) => {
       }
     }, 5000);
     return () => clearTimeout(timer);
-  }, [isOpen, accessibilityMode]);
-
-  const clearPreviewTimer = () => {
-    if (previewTimerRef.current !== null) {
-      clearTimeout(previewTimerRef.current);
-      previewTimerRef.current = null;
-    }
-  };
-
-  const cleanupRecording = () => {
-    if (vadIntervalRef.current !== null) {
-      clearInterval(vadIntervalRef.current);
-      vadIntervalRef.current = null;
-    }
-    if (audioContextRef.current) {
-      audioContextRef.current.close().catch(() => { });
-      audioContextRef.current = null;
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-    silenceStartRef.current = null;
-  };
-
-  const sendAudioAndPreview = async (blob: Blob, mode: boolean) => {
-    if (!liveConfig.projectId) return;
-    const fileType = blob.type || "audio/webm";
-    const ext = fileType.includes("ogg") ? "ogg" : fileType.includes("wav") ? "wav" : "webm";
-    const file = new File([blob], `voice.${ext}`, { type: fileType });
-
-    const sessionId =
-      typeof localStorage !== "undefined" ? localStorage.getItem(SESSION_ID_KEY) : null;
-    const pageContext = getPageContext().summary;
-    assistantMsgIdRef.current = null;
-    setIsProcessing(true);
-    setPreviewMessage("Düşünüyor...");
-    isProcessingRef.current = true;
-    console.info(`[Bulut] voice request started accessibility_mode=${mode}`);
-
-    // Bridge an AgentToolCallInfo to a ToolCallWithId for execution
-    const handleToolExecution = async (
-      call: AgentToolCallInfo,
-    ): Promise<{ call_id: string; result: string }> => {
-      const toolCall: ToolCallWithId = {
-        tool: call.tool as "navigate" | "getPageContext" | "interact" | "scroll",
-        call_id: call.call_id,
-        ...call.args,
-      } as ToolCallWithId;
-      return executeSingleToolCall(toolCall);
-    };
-
-    try {
-      const controller = agentVoiceChatStream(
-        liveConfig.backendBaseUrl,
-        file,
-        liveConfig.projectId,
-        sessionId,
-        {
-          model: liveConfig.model,
-          voice: liveConfig.voice,
-          pageContext,
-          accessibilityMode: mode,
-        },
-        {
-          onTranscription: (data) => {
-            if (data.session_id && typeof localStorage !== "undefined") {
-              localStorage.setItem(SESSION_ID_KEY, data.session_id);
-            }
-            if (data.user_text?.trim()) {
-              appendToStoredMessages(data.user_text, true);
-              playSfx("sent");
-            }
-          },
-          onSessionId: (sid) => {
-            if (sid && typeof localStorage !== "undefined") {
-              localStorage.setItem(SESSION_ID_KEY, sid);
-            }
-          },
-          onAssistantDelta: (delta) => {
-            const current = assistantMsgIdRef.current;
-            if (current === null) {
-              clearPreviewTimer();
-              assistantMsgIdRef.current = appendToStoredMessages(delta, false);
-              setPreviewMessage(delta);
-            } else {
-              // Read the current text from storage and append delta
-              const saved = typeof localStorage !== "undefined"
-                ? localStorage.getItem(CHAT_STORAGE_KEY) : null;
-              let updatedText = delta;
-              if (saved) {
-                try {
-                  const msgs = JSON.parse(saved) as StoredMessage[];
-                  const existing = msgs.find((m: StoredMessage) => m.id === current);
-                  updatedText = (existing?.text || "") + delta;
-                } catch { /* ignore */ }
-              }
-              updateStoredMessage(current, updatedText);
-              setPreviewMessage(updatedText);
-            }
-          },
-          onAssistantDone: (assistantText) => {
-            if (assistantMsgIdRef.current !== null) {
-              updateStoredMessage(assistantMsgIdRef.current, assistantText);
-            } else {
-              appendToStoredMessages(assistantText, false);
-            }
-            setPreviewMessage(assistantText);
-            playSfx("completed");
-          },
-          onToolCalls: (calls) => {
-            setPreviewMessage("Araç çalıştırılıyor...");
-            playSfx("toolCall");
-            for (const call of calls) {
-              const toolLabel =
-                call.tool === "navigate"
-                  ? `Sayfaya gidiliyor: ${call.args.url ?? ""}`
-                  : call.tool === "getPageContext"
-                    ? "Sayfa bağlamı alınıyor…"
-                    : call.tool === "interact"
-                      ? `Etkileşim: ${call.args.action ?? ""}`
-                      : call.tool === "scroll"
-                        ? "Kaydırılıyor…"
-                        : call.tool;
-              console.info(`[Bulut] tool call: ${toolLabel}`);
-            }
-            // Reset assistant message ref so next reply gets a new entry
-            assistantMsgIdRef.current = null;
-          },
-          onToolResult: () => {},
-          onIteration: () => {
-            setPreviewMessage("Düşünüyor...");
-            playSfx("thinking");
-          },
-          onAudioStateChange: (state) => {
-            console.info(`[Bulut] audio state ${state} accessibility_mode=${mode}`);
-          },
-          onError: (error) => {
-            console.error(`[Bulut] voice pipeline error ${error}`);
-            setPreviewMessage(null);
-          },
-        },
-        handleToolExecution,
-      );
-      activeControllerRef.current = controller;
-      await controller.done;
-    } catch (error) {
-      console.error("[Bulut] voice request failed", error);
-      setPreviewMessage(null);
-    } finally {
-      activeControllerRef.current = null;
-      setIsProcessing(false);
-      isProcessingRef.current = false;
-      console.info(`[Bulut] voice request completed accessibility_mode=${mode}`);
-    }
-  };
-
-  const startButtonRecording = async () => {
-    if (isRecordingRef.current || isProcessingRef.current) return;
-    autoListenSuppressedRef.current = false;
-    setPreviewMessage("Dinliyor...");
-    console.info(`[Bulut] start recording accessibility_mode=${accessibilityMode}`);
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-
-      const opts: MediaRecorderOptions = { audioBitsPerSecond: 16_000 };
-      for (const mime of ["audio/ogg;codecs=opus", "audio/webm;codecs=opus", "audio/webm"]) {
-        if (MediaRecorder.isTypeSupported(mime)) { opts.mimeType = mime; break; }
-      }
-
-      const recorder = new MediaRecorder(stream, opts);
-      recorderRef.current = recorder;
-      audioChunksRef.current = [];
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
-      };
-
-      recorder.onstop = async () => {
-        setIsRecording(false);
-        isRecordingRef.current = false;
-        cleanupRecording();
-
-        const blob = new Blob(audioChunksRef.current, {
-          type: recorder.mimeType || "audio/webm",
-        });
-        audioChunksRef.current = [];
-        if (blob.size === 0) {
-          setPreviewMessage(null);
-          return;
-        }
-
-        await sendAudioAndPreview(blob, accessibilityMode);
-      };
-
-      // Setup VAD
-      const AudioCtx =
-        window.AudioContext ||
-        (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-
-      if (AudioCtx) {
-        const ctx = new AudioCtx();
-        audioContextRef.current = ctx;
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 256;
-        const source = ctx.createMediaStreamSource(stream);
-        source.connect(analyser);
-        const dataArray = new Uint8Array(analyser.frequencyBinCount);
-        let speechDetected = false;
-
-        vadIntervalRef.current = window.setInterval(() => {
-          if (!isRecordingRef.current || recorder.state === "inactive") {
-            cleanupRecording();
-            return;
-          }
-          analyser.getByteFrequencyData(dataArray);
-          let sum = 0;
-          for (const v of dataArray) sum += v;
-          const volume = sum / dataArray.length / 255;
-
-          if (volume < VAD_THRESHOLD) {
-            if (silenceStartRef.current === null) {
-              silenceStartRef.current = Date.now();
-              return;
-            }
-            if (speechDetected && Date.now() - silenceStartRef.current > SILENCE_DURATION_MS) {
-              recorder.stop();
-            }
-            return;
-          }
-          speechDetected = true;
-          silenceStartRef.current = null;
-        }, 50);
-      }
-
-      recorder.start(200);
-      setIsRecording(true);
-      isRecordingRef.current = true;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`[Bulut] microphone start failed ${message}`);
-      if (message.toLowerCase().includes("permission")) {
-        autoListenSuppressedRef.current = true;
-      }
-      setPreviewMessage(null);
-      cleanupRecording();
-      setIsRecording(false);
-      isRecordingRef.current = false;
-    }
-  };
-
-  const cancelRecording = () => {
-    const recorder = recorderRef.current;
-    if (recorder && recorder.state !== "inactive") {
-      // Override onstop so it doesn't send the audio
-      recorder.onstop = () => {
-        setIsRecording(false);
-        isRecordingRef.current = false;
-        cleanupRecording();
-        setPreviewMessage(null);
-      };
-      recorder.stop();
-    } else {
-      setIsRecording(false);
-      isRecordingRef.current = false;
-      cleanupRecording();
-      setPreviewMessage(null);
-    }
-  };
+  }, [isOpen, isAccessibilityEnabled]);
 
   const toggleWidget = () => {
     const newState = !isOpen;
-    if (newState) {
-      // Opening chat history disables accessibility mode and auto-listening.
-      if (activeControllerRef.current) {
-        activeControllerRef.current.stop();
-      }
-      cancelRecording();
-      setIsProcessing(false);
-      isProcessingRef.current = false;
-    }
     setIsOpen(newState);
     setShowBubble(false);
     if (typeof localStorage !== "undefined") {
@@ -598,9 +238,6 @@ const BulutWidget = ({ config }: BulutWidgetProps) => {
 
   const handleClose = () => {
     setIsOpen(false);
-    if (!previewMessage) {
-      setPreviewMessage(getGreetingText(liveConfig.agentName));
-    }
     if (typeof localStorage !== "undefined") {
       localStorage.setItem("bulut_panel_open", "false");
     }
@@ -622,76 +259,38 @@ const BulutWidget = ({ config }: BulutWidgetProps) => {
     return () => document.removeEventListener("keydown", handleEscape);
   }, [isOpen]);
 
-  // Cleanup on unmount
-  useEffect(
-    () => () => {
-      clearPreviewTimer();
-      if (activeControllerRef.current) {
-        activeControllerRef.current.stop();
-        activeControllerRef.current = null;
-      }
-      cancelRecording();
-    },
-    [],
-  );
-
-  // Voice-only accessibility loop: auto-start listening whenever idle.
-  useEffect(() => {
-    if (!accessibilityMode) {
-      return;
-    }
-    if (isRecording || isProcessing || autoListenSuppressedRef.current) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      if (
-        accessibilityMode &&
-        !isRecordingRef.current &&
-        !isProcessingRef.current &&
-        !autoListenSuppressedRef.current
-      ) {
-        console.info("[Bulut] accessibility auto-listen trigger");
-        void startButtonRecording();
-      }
-    }, 250);
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [accessibilityMode, isRecording, isProcessing]);
-
   if (!configReady) return null;
 
   return (
     <>
       {!isOpen && (
         <ChatButton
-          onMicClick={startButtonRecording}
-          onCancelRecording={cancelRecording}
+          onMicClick={() => chatActionsRef.current?.startRecording()}
+          onCancelRecording={() => chatActionsRef.current?.cancelRecording()}
+          onStopTask={() => chatActionsRef.current?.stopTask()}
           isRecording={isRecording}
+          isBusy={isBusy}
           showBubble={showBubble}
           onBubbleClick={() => {
             setShowBubble(false);
             toggleWidget();
           }}
-          previewMessage={previewMessage}
-          onPreviewClick={() => {
-            clearPreviewTimer();
-            toggleWidget();
-          }}
-          onPreviewClose={() => {
-            setPreviewMessage(null);
-            clearPreviewTimer();
-          }}
+          previewMessage={previewDismissed ? null : previewMessage}
+          onPreviewClick={() => toggleWidget()}
+          onPreviewClose={() => setPreviewDismissed(true)}
         />
       )}
-      {isOpen && (
-        <ChatWindow
-          onClose={handleClose}
-          config={liveConfig}
-          accessibilityMode={isAccessibilityEnabled}
-          onAccessibilityToggle={toggleAccessibilityMode}
-        />
-      )}
+      <ChatWindow
+        onClose={handleClose}
+        config={liveConfig}
+        accessibilityMode={isAccessibilityEnabled}
+        onAccessibilityToggle={toggleAccessibilityMode}
+        hidden={!isOpen}
+        actionsRef={chatActionsRef}
+        onRecordingChange={setIsRecording}
+        onBusyChange={setIsBusy}
+        onPreviewChange={handlePreviewChange}
+      />
     </>
   );
 };

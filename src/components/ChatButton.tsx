@@ -8,13 +8,15 @@ import {
   BORDER_RADIUS,
   getContrastIconFilter,
 } from "../styles/constants";
-import { closeIconContent, microphoneIconContent } from "../assets";
+import { closeIconContent, microphoneIconContent, stopIconContent } from "../assets";
 import { SvgIcon } from "./SvgIcon";
 
 interface ChatButtonProps {
   onMicClick: () => void;
   onCancelRecording: () => void;
+  onStopTask: () => void;
   isRecording: boolean;
+  isBusy: boolean;
   showBubble: boolean;
   onBubbleClick: () => void;
   previewMessage: string | null;
@@ -25,7 +27,9 @@ interface ChatButtonProps {
 export const ChatButton = ({
   onMicClick,
   onCancelRecording,
+  onStopTask,
   isRecording,
+  isBusy,
   showBubble,
   onBubbleClick,
   previewMessage,
@@ -74,8 +78,12 @@ export const ChatButton = ({
     filter: getContrastIconFilter(bgColor),
   };
 
+  const showStopButton = isBusy && !isRecording;
+
   const handleClick = () => {
-    if (isRecording) {
+    if (showStopButton) {
+      onStopTask();
+    } else if (isRecording) {
       onCancelRecording();
     } else {
       onMicClick();
@@ -237,10 +245,10 @@ export const ChatButton = ({
                 transform: "scale(1)",
               });
             }}
-            aria-label={isRecording ? "Kaydı iptal et" : "Konuşmaya başla"}
+            aria-label={showStopButton ? "Görevi durdur" : isRecording ? "Kaydı iptal et" : "Konuşmaya başla"}
           >
             <SvgIcon
-              src={isRecording ? closeIconContent : microphoneIconContent}
+              src={showStopButton ? stopIconContent : isRecording ? closeIconContent : microphoneIconContent}
               aria-hidden="true"
               fill-opacity={0}
               stroke={"currentColor"}
