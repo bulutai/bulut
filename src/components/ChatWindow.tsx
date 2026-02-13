@@ -2,11 +2,14 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { JSX } from "preact";
 import type { BulutRuntimeConfig } from "../index";
 import {
+  agentTextChatStream,
   agentVoiceChatStream,
   agentResumeStream,
+  startSttWebSocketStream,
   type AudioStreamState,
   type StreamController,
   type AgentToolCallInfo,
+  type SttWsController,
 } from "../api/client";
 import {
   executeSingleToolCall,
@@ -28,16 +31,13 @@ import {
 } from "../styles/constants";
 import {
   closeIconContent,
-  completedSfxUrl,
   microphoneIconContent,
   stopIconContent,
-  sentSfxUrl,
-  thinkingSfxUrl,
   restartIconContent,
-  toolCallSfxUrl,
   logoContent,
 } from "../assets";
 import { StreamingJsonParser } from "../utils/streamingJson";
+import { playCue, type SfxName } from "../audio/sfxManager";
 
 import { SvgIcon } from "./SvgIcon";
 
@@ -78,7 +78,7 @@ const TIMESTAMP_KEY = "bulut_chat_timestamp";
 const SESSION_ID_KEY = "bulut_session_id";
 const TTL_MS = 5 * 60 * 1000;
 const VAD_THRESHOLD = 0.06;
-const SILENCE_DURATION_MS = 1000;
+const SILENCE_DURATION_MS = 500;
 export const HOLD_THRESHOLD_MS = 250;
 
 const STATUS_LABELS = {
@@ -90,15 +90,6 @@ const STATUS_LABELS = {
   playingAudio: "Ses oynatılıyor",
   runningTools: "Araç çalıştırılıyor",
 } as const;
-
-type SfxName = "sent" | "thinking" | "toolCall" | "completed";
-
-const SFX_SOURCES: Record<SfxName, string> = {
-  sent: sentSfxUrl,
-  thinking: thinkingSfxUrl,
-  toolCall: toolCallSfxUrl,
-  completed: completedSfxUrl,
-};
 
 export const getGreetingText = (agentName: string): string =>
   `Merhaba, ben ${agentName}. Bu web sayfasında neler yapalım?`;
@@ -301,11 +292,9 @@ export const ChatWindow = ({
   const pendingAssistantTextRef = useRef<string>("");
   const streamingJsonParserRef = useRef<StreamingJsonParser | null>(null);
   const awaitingAssistantResponseRef = useRef(false);
-  const sfxQueueRef = useRef<SfxName[]>([]);
-  const sfxQueueActiveRef = useRef(false);
-  const sfxDisposedRef = useRef(false);
-  const activeSfxAudioRef = useRef<HTMLAudioElement | null>(null);
-  const activeSfxResolveRef = useRef<(() => void) | null>(null);
+  const activeSttWsRef = useRef<SttWsController | null>(null);
+  const liveTranscriptionMessageIdRef = useRef<number | null>(null);
+  const liveTranscriptionTextRef = useRef("");
   const autoListenSuppressedRef = useRef(false);
 
   useEffect(() => {
@@ -347,71 +336,8 @@ export const ChatWindow = ({
   }, [isRecording, isBusy, isTranscribing, isThinking, isRunningTools,
       isPlayingAudio, isRenderingAudio, statusOverride, messages]);
 
-  const playSfxNow = (name: SfxName): Promise<void> =>
-    new Promise((resolve) => {
-      if (typeof window === "undefined" || sfxDisposedRef.current) {
-        resolve();
-        return;
-      }
-
-      const audio = new Audio(SFX_SOURCES[name]);
-      audio.preload = "auto";
-      activeSfxAudioRef.current = audio;
-
-      let settled = false;
-      const finalize = () => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        audio.onended = null;
-        audio.onerror = null;
-        if (activeSfxAudioRef.current === audio) {
-          activeSfxAudioRef.current = null;
-        }
-        if (activeSfxResolveRef.current === finalize) {
-          activeSfxResolveRef.current = null;
-        }
-        resolve();
-      };
-
-      activeSfxResolveRef.current = finalize;
-      audio.onended = finalize;
-      audio.onerror = finalize;
-
-      void audio.play().catch(() => {
-        // Browser autoplay policies can block short cues.
-        finalize();
-      });
-    });
-
-  const drainSfxQueue = async () => {
-    if (sfxQueueActiveRef.current || sfxDisposedRef.current) {
-      return;
-    }
-
-    sfxQueueActiveRef.current = true;
-    try {
-      while (!sfxDisposedRef.current && sfxQueueRef.current.length > 0) {
-        const next = sfxQueueRef.current.shift();
-        if (!next) {
-          continue;
-        }
-        await playSfxNow(next);
-      }
-    } finally {
-      sfxQueueActiveRef.current = false;
-    }
-  };
-
   const playSfx = (name: SfxName) => {
-    if (typeof window === "undefined" || sfxDisposedRef.current) {
-      return;
-    }
-    sfxQueueRef.current.push(name);
-    if (!sfxQueueActiveRef.current) {
-      void drainSfxQueue();
-    }
+    playCue(name);
   };
 
   useEffect(() => {
@@ -526,12 +452,21 @@ export const ChatWindow = ({
     activeStreamControllerRef.current = null;
   };
 
+  const cancelActiveSttWs = () => {
+    const activeSttWs = activeSttWsRef.current;
+    activeSttWsRef.current = null;
+    activeSttWs?.cancel();
+    liveTranscriptionMessageIdRef.current = null;
+    liveTranscriptionTextRef.current = "";
+  };
+
   useEffect(
     () => () => {
       clearMicHoldTimeout();
       pendingStopAfterStartRef.current = false;
 
       stopActiveStream();
+      cancelActiveSttWs();
       cleanupVAD();
       stopStreamTracks();
       stopRecordingTimer();
@@ -547,21 +482,7 @@ export const ChatWindow = ({
         recorderRef.current = null;
       }
 
-      sfxDisposedRef.current = true;
-      sfxQueueRef.current = [];
-      sfxQueueActiveRef.current = false;
-
-      const activeAudio = activeSfxAudioRef.current;
-      if (activeAudio) {
-        activeAudio.pause();
-        activeAudio.removeAttribute("src");
-        activeAudio.load();
-        activeSfxAudioRef.current = null;
-      }
-
-      const resolveActiveSfx = activeSfxResolveRef.current;
-      activeSfxResolveRef.current = null;
-      resolveActiveSfx?.();
+      cancelActiveSttWs();
     },
     [],
   );
@@ -752,6 +673,24 @@ export const ChatWindow = ({
     );
   };
 
+  const upsertLiveUserTranscription = (text: string) => {
+    const normalized = text.trim();
+    if (!normalized) {
+      return;
+    }
+    liveTranscriptionTextRef.current = normalized;
+    if (liveTranscriptionMessageIdRef.current === null) {
+      liveTranscriptionMessageIdRef.current = appendMessage(normalized, true);
+      return;
+    }
+    updateMessageText(liveTranscriptionMessageIdRef.current, normalized);
+  };
+
+  const clearLiveUserTranscriptionState = () => {
+    liveTranscriptionMessageIdRef.current = null;
+    liveTranscriptionTextRef.current = "";
+  };
+
   const handleAudioStateChange = (state: AudioStreamState) => {
     if (state === "rendering") {
       setIsRenderingAudio(true);
@@ -779,6 +718,207 @@ export const ChatWindow = ({
 
     setIsRenderingAudio(false);
     setIsPlayingAudio(false);
+  };
+
+  const finalizeStreamCycle = () => {
+    awaitingAssistantResponseRef.current = false;
+    setStatusOverride(null);
+    setIsBusy(false);
+    setIsTranscribing(false);
+    setIsThinking(false);
+    setIsRenderingAudio(false);
+    setIsPlayingAudio(false);
+    setIsRunningTools(false);
+    pendingUserTextRef.current = null;
+    pendingAssistantTextRef.current = "";
+    assistantMessageIdRef.current = null;
+    if (activeStreamControllerRef.current) {
+      activeStreamControllerRef.current = null;
+    }
+    if (
+      !autoListenSuppressedRef.current &&
+      shouldAutoListenAfterAudio(
+        accessibilityMode,
+        isRecordingRef.current,
+        isBusyRef.current,
+      )
+    ) {
+      console.info("[Bulut] chat-window auto-listen trigger after stream completion");
+      void startRecording("vad");
+    }
+  };
+
+  const runAgentForUserText = async (userText: string) => {
+    if (!config.projectId) {
+      appendMessage("Hata: Project ID yapılandırılmamış.", false);
+      return;
+    }
+
+    const normalizedUserText = userText.trim();
+    if (!normalizedUserText) {
+      appendMessage("Ses kaydı metne dönüştürülemedi. Lütfen tekrar deneyin.", false);
+      return;
+    }
+
+    setIsBusy(true);
+    setIsTranscribing(false);
+    setIsThinking(true);
+    setIsRenderingAudio(false);
+    setIsPlayingAudio(false);
+    setIsRunningTools(false);
+    setStatusOverride(STATUS_LABELS.thinking);
+    awaitingAssistantResponseRef.current = true;
+
+    try {
+      pendingUserTextRef.current = normalizedUserText;
+      upsertLiveUserTranscription(normalizedUserText);
+      clearLiveUserTranscriptionState();
+
+      stopActiveStream();
+      const pageContext = getPageContext().summary;
+
+      const handleToolExecution = async (
+        call: AgentToolCallInfo,
+      ): Promise<{ call_id: string; result: string }> => {
+        const toolCall: ToolCallWithId = {
+          tool: call.tool as
+            | "navigate"
+            | "getPageContext"
+            | "interact"
+            | "scroll",
+          call_id: call.call_id,
+          ...call.args,
+        } as ToolCallWithId;
+        return executeSingleToolCall(toolCall);
+      };
+
+      const controller = agentTextChatStream(
+        config.backendBaseUrl,
+        normalizedUserText,
+        config.projectId,
+        sessionIdRef.current,
+        {
+          model: config.model,
+          voice: config.voice,
+          pageContext,
+          accessibilityMode,
+        },
+        {
+          onSessionId: (sid) => {
+            if (sid && sid !== sessionIdRef.current) {
+              sessionIdRef.current = sid;
+              if (typeof localStorage !== "undefined") {
+                localStorage.setItem(SESSION_ID_KEY, sid);
+              }
+            }
+          },
+          onAssistantDelta: (delta) => {
+            setIsTranscribing(false);
+            setIsThinking(true);
+            setIsRunningTools(false);
+            if (awaitingAssistantResponseRef.current) {
+              awaitingAssistantResponseRef.current = false;
+              setStatusOverride(null);
+            }
+
+            pendingAssistantTextRef.current += delta;
+
+            if (assistantMessageIdRef.current === null) {
+              assistantMessageIdRef.current = appendMessage(
+                pendingAssistantTextRef.current,
+                false,
+              );
+            } else {
+              updateMessageText(
+                assistantMessageIdRef.current,
+                pendingAssistantTextRef.current,
+              );
+            }
+          },
+          onAssistantDone: (assistantText) => {
+            playSfx("completed");
+            awaitingAssistantResponseRef.current = false;
+            setStatusOverride(null);
+            setIsThinking(false);
+            setIsRenderingAudio(true);
+
+            const finalDisplayText = assistantText || pendingAssistantTextRef.current;
+            pendingAssistantTextRef.current = finalDisplayText;
+
+            if (assistantMessageIdRef.current !== null) {
+              updateMessageText(
+                assistantMessageIdRef.current,
+                finalDisplayText,
+              );
+            } else {
+              assistantMessageIdRef.current = appendMessage(
+                finalDisplayText,
+                false,
+              );
+            }
+          },
+          onToolCalls: (calls) => {
+            if (calls.length > 0) {
+              playSfx("toolCall");
+            }
+            setIsRunningTools(true);
+            setStatusOverride(STATUS_LABELS.runningTools);
+
+            for (const call of calls) {
+              const toolLabel =
+                call.tool === "navigate"
+                  ? `Sayfaya gidiliyor: ${call.args.url ?? ""}`
+                  : call.tool === "getPageContext"
+                    ? "Sayfa bağlamı alınıyor…"
+                    : call.tool === "interact"
+                      ? `Etkileşim: ${call.args.action ?? ""}`
+                      : call.tool === "scroll"
+                        ? "Kaydırılıyor…"
+                        : call.tool;
+
+              appendMessage(`${toolLabel}`, false);
+              setMessages((prev) => {
+                const last = prev[prev.length - 1];
+                if (last && !last.isUser) {
+                  return [
+                    ...prev.slice(0, -1),
+                    { ...last, type: "tool" as const },
+                  ];
+                }
+                return prev;
+              });
+            }
+
+            assistantMessageIdRef.current = null;
+            pendingAssistantTextRef.current = "";
+          },
+          onToolResult: () => {},
+          onIteration: () => {
+            playSfx("thinking");
+            setIsThinking(true);
+            setStatusOverride(STATUS_LABELS.thinking);
+          },
+          onAudioStateChange: handleAudioStateChange,
+          onError: (err) => {
+            awaitingAssistantResponseRef.current = false;
+            setStatusOverride(null);
+            appendMessage(`Hata: ${err}`, false);
+          },
+        },
+        handleToolExecution,
+      );
+
+      activeStreamControllerRef.current = controller;
+      await controller.done;
+    } catch (error) {
+      awaitingAssistantResponseRef.current = false;
+      setStatusOverride(null);
+      if (error instanceof Error) {
+        appendMessage(`Hata: ${error.message}`, false);
+      }
+    } finally {
+      finalizeStreamCycle();
+    }
   };
 
   const handleAudioBlob = async (blob: Blob) => {
@@ -853,13 +993,16 @@ export const ChatWindow = ({
               }
             }
 
-            // Guard: only append user text once (STT callback fires once)
-            if (
-              data.user_text.trim() &&
-              pendingUserTextRef.current !== data.user_text
-            ) {
-              pendingUserTextRef.current = data.user_text;
-              appendMessage(data.user_text, true);
+            const normalized = data.user_text.trim();
+            if (normalized) {
+              const previousUserText = pendingUserTextRef.current;
+              pendingUserTextRef.current = normalized;
+              if (liveTranscriptionMessageIdRef.current !== null) {
+                updateMessageText(liveTranscriptionMessageIdRef.current, normalized);
+                clearLiveUserTranscriptionState();
+              } else if (previousUserText !== normalized) {
+                appendMessage(normalized, true);
+              }
             }
 
             setIsTranscribing(false);
@@ -994,34 +1137,7 @@ export const ChatWindow = ({
       awaitingAssistantResponseRef.current = false;
       setStatusOverride(null);
     } finally {
-      awaitingAssistantResponseRef.current = false;
-      setStatusOverride(null);
-      setIsBusy(false);
-      setIsTranscribing(false);
-      setIsThinking(false);
-      setIsRenderingAudio(false);
-      setIsPlayingAudio(false);
-      setIsRunningTools(false);
-      // Reset for next message cycle
-      pendingUserTextRef.current = null;
-      pendingAssistantTextRef.current = "";
-      assistantMessageIdRef.current = null;
-      if (activeStreamControllerRef.current) {
-        activeStreamControllerRef.current = null;
-      }
-      if (
-        !autoListenSuppressedRef.current &&
-        shouldAutoListenAfterAudio(
-          accessibilityMode,
-          isRecordingRef.current,
-          isBusyRef.current,
-        )
-      ) {
-        console.info(
-          "[Bulut] chat-window auto-listen trigger after stream completion",
-        );
-        void startRecording("vad");
-      }
+      finalizeStreamCycle();
     }
   };
 
@@ -1147,10 +1263,53 @@ export const ChatWindow = ({
       const recorder = new MediaRecorder(stream, recorderOptions);
       recorderRef.current = recorder;
       audioChunksRef.current = [];
+      clearLiveUserTranscriptionState();
+
+      const sttMimeType = (recorder.mimeType || recorderOptions.mimeType || "audio/webm")
+        .split(";")[0]
+        .trim() || "audio/webm";
+
+      const sttWsController = startSttWebSocketStream(
+        config.backendBaseUrl,
+        {
+          projectId: config.projectId,
+          sessionId: sessionIdRef.current,
+          language: "tr",
+          mimeType: sttMimeType,
+        },
+        {
+          onRequestSent: () => {
+            playSfx("sent");
+          },
+          onSessionId: (sid) => {
+            if (!sid || sid === sessionIdRef.current) {
+              return;
+            }
+            sessionIdRef.current = sid;
+            if (typeof localStorage !== "undefined") {
+              localStorage.setItem(SESSION_ID_KEY, sid);
+            }
+          },
+          onPartial: ({ text }) => {
+            if (!text.trim()) {
+              return;
+            }
+            upsertLiveUserTranscription(text);
+          },
+        },
+      );
+      activeSttWsRef.current = sttWsController;
 
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           audioChunksRef.current.push(event.data);
+          if (activeSttWsRef.current) {
+            void activeSttWsRef.current.pushChunk(event.data).catch((error) => {
+              console.warn(
+                `[Bulut] STT WS chunk send failed: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            });
+          }
         }
       };
 
@@ -1175,15 +1334,49 @@ export const ChatWindow = ({
         });
         audioChunksRef.current = [];
 
+        const currentSttWs = activeSttWsRef.current;
+        activeSttWsRef.current = null;
+
         if (shouldDiscard) {
+          currentSttWs?.cancel();
+          clearLiveUserTranscriptionState();
           setStatusOverride(null);
           return;
         }
 
         if (blob.size === 0) {
+          currentSttWs?.cancel();
+          clearLiveUserTranscriptionState();
           setStatusOverride(null);
           appendMessage("Ses kaydı alınamadı. Lütfen tekrar deneyin.", false);
           return;
+        }
+
+        setIsTranscribing(true);
+        setStatusOverride(STATUS_LABELS.transcribing);
+
+        try {
+          if (currentSttWs) {
+            const sttResult = await currentSttWs.stop();
+            if (sttResult.session_id && sttResult.session_id !== sessionIdRef.current) {
+              sessionIdRef.current = sttResult.session_id;
+              if (typeof localStorage !== "undefined") {
+                localStorage.setItem(SESSION_ID_KEY, sttResult.session_id);
+              }
+            }
+            if (sttResult.text.trim()) {
+              upsertLiveUserTranscription(sttResult.text);
+              setStatusOverride(STATUS_LABELS.thinking);
+              await runAgentForUserText(sttResult.text);
+              return;
+            }
+          }
+        } catch (error) {
+          console.warn(
+            `[Bulut] STT WS finalization failed, falling back to /chat/stt: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        } finally {
+          clearLiveUserTranscriptionState();
         }
 
         setStatusOverride(STATUS_LABELS.thinking);
@@ -1209,6 +1402,7 @@ export const ChatWindow = ({
       if (errMsg.toLowerCase().includes("permission") || errMsg.toLowerCase().includes("denied")) {
         autoListenSuppressedRef.current = true;
       }
+      cancelActiveSttWs();
       setStatusOverride(null);
       appendMessage(`Mikrofon hatası: ${errMsg}`, false);
       cleanupVAD();
@@ -1323,6 +1517,7 @@ export const ChatWindow = ({
     pendingStopAfterStartRef.current = false;
 
     stopActiveStream();
+    cancelActiveSttWs();
 
     if (recorderRef.current && recorderRef.current.state !== "inactive") {
       stopRecording({ discard: true });
@@ -1364,6 +1559,7 @@ export const ChatWindow = ({
 
   const stopTask = () => {
     stopActiveStream();
+    cancelActiveSttWs();
     stopRecording({ discard: true });
     cleanupVAD();
     stopStreamTracks();
@@ -1379,6 +1575,7 @@ export const ChatWindow = ({
         void startRecording("vad");
       },
       cancelRecording: () => {
+        cancelActiveSttWs();
         const recorder = recorderRef.current;
         if (recorder && recorder.state !== "inactive") {
           stopRecording({ discard: true });

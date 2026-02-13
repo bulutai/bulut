@@ -3,6 +3,7 @@ import {
   TTS_WS_RETRY_DELAYS_MS,
   base64ToUint8Array,
   isAudioSsePayload,
+  parseSttWsEventPayload,
   parseTtsWsEventPayload,
   parseSseEventPayload,
   shouldAcceptAudioSeq,
@@ -96,5 +97,24 @@ describe("tts websocket helpers", () => {
 
   it("uses configured reconnect delays", () => {
     expect(TTS_WS_RETRY_DELAYS_MS).toEqual([250, 750, 1500]);
+  });
+});
+
+describe("stt websocket helpers", () => {
+  it("parses websocket event payloads", () => {
+    const payload = parseSttWsEventPayload(
+      JSON.stringify({ type: "partial", seq: 7, text: "merhaba" }),
+    );
+
+    expect(payload).toEqual({
+      type: "partial",
+      seq: 7,
+      text: "merhaba",
+    });
+  });
+
+  it("returns null for invalid payloads", () => {
+    expect(parseSttWsEventPayload("{invalid")).toBeNull();
+    expect(parseSttWsEventPayload(123)).toBeNull();
   });
 });

@@ -43,6 +43,15 @@ interface TtsWsEventPayload {
   last_seq?: number;
 }
 
+interface SttWsEventPayload {
+  type?: string;
+  session_id?: string;
+  seq?: number;
+  text?: string;
+  error?: string;
+  retryable?: boolean;
+}
+
 export type AudioStreamState = "rendering" | "playing" | "done" | "fallback";
 export const TTS_WS_RETRY_DELAYS_MS = [250, 750, 1500];
 
@@ -79,6 +88,19 @@ export const parseTtsWsEventPayload = (
       return null;
     }
     return JSON.parse(value) as TtsWsEventPayload;
+  } catch {
+    return null;
+  }
+};
+
+export const parseSttWsEventPayload = (
+  value: unknown,
+): SttWsEventPayload | null => {
+  try {
+    if (typeof value !== "string") {
+      return null;
+    }
+    return JSON.parse(value) as SttWsEventPayload;
   } catch {
     return null;
   }
@@ -122,6 +144,16 @@ export const base64ToUint8Array = (base64: string): Uint8Array<ArrayBuffer> => {
     bytes[i] = binaryString.charCodeAt(i);
   }
   return bytes;
+};
+
+const blobToBase64 = async (blob: Blob): Promise<string> => {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const chunkSize = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
 };
 
 const createWavHeader = (
@@ -336,6 +368,180 @@ export async function transcribeAudio(
   }
   return response.json();
 }
+
+export interface SttWsResult {
+  text: string;
+  session_id: string;
+}
+
+export interface SttWsEvents {
+  onRequestSent?: () => void;
+  onSessionId?: (sessionId: string) => void;
+  onPartial?: (payload: { seq: number; text: string }) => void;
+}
+
+export interface SttWsController {
+  pushChunk: (chunk: Blob) => Promise<void>;
+  stop: () => Promise<SttWsResult>;
+  cancel: () => void;
+}
+
+export const startSttWebSocketStream = (
+  baseUrl: string,
+  config: {
+    projectId: string;
+    sessionId: string | null;
+    language?: string;
+    mimeType?: string;
+  },
+  events: SttWsEvents = {},
+): SttWsController => {
+  const wsUrl = toWebSocketUrl(baseUrl, "/chat/stt/ws");
+  const socket = new WebSocket(wsUrl);
+  let seq = 0;
+  let finalText = "";
+  let finalSessionId = config.sessionId || "";
+  let stopped = false;
+  let settled = false;
+  let sendQueue: Promise<void> = Promise.resolve();
+
+  let resolveStart: (() => void) | null = null;
+  let rejectStart: ((error: Error & { retryable?: boolean }) => void) | null = null;
+  const startPromise = new Promise<void>((resolve, reject) => {
+    resolveStart = resolve;
+    rejectStart = reject;
+  });
+
+  let resolveDone: ((result: SttWsResult) => void) | null = null;
+  let rejectDone: ((error: Error & { retryable?: boolean }) => void) | null = null;
+  const donePromise = new Promise<SttWsResult>((resolve, reject) => {
+    resolveDone = resolve;
+    rejectDone = reject;
+  });
+
+  const rejectAll = (error: Error & { retryable?: boolean }) => {
+    if (settled) return;
+    settled = true;
+    rejectStart?.(error);
+    rejectDone?.(error);
+  };
+
+  const resolveDoneIfPossible = () => {
+    if (settled) return;
+    if (!finalText.trim() || !finalSessionId) return;
+    settled = true;
+    resolveStart?.();
+    resolveDone?.({
+      text: finalText.trim(),
+      session_id: finalSessionId,
+    });
+  };
+
+  const enqueueSend = (payload: Record<string, unknown>): Promise<void> => {
+    sendQueue = sendQueue.then(() => {
+      if (stopped || socket.readyState !== WebSocket.OPEN) return;
+      socket.send(JSON.stringify(payload));
+    });
+    return sendQueue;
+  };
+
+  socket.onopen = () => {
+    events.onRequestSent?.();
+    socket.send(
+      JSON.stringify({
+        type: "start",
+        project_id: config.projectId,
+        session_id: config.sessionId || undefined,
+        language: config.language || "tr",
+        mime_type: config.mimeType || "audio/webm",
+      }),
+    );
+  };
+
+  socket.onmessage = (event) => {
+    const payload = parseSttWsEventPayload(String(event.data));
+    if (!payload) return;
+
+    if (payload.type === "start_ack" && typeof payload.session_id === "string") {
+      finalSessionId = payload.session_id;
+      events.onSessionId?.(payload.session_id);
+      resolveStart?.();
+      return;
+    }
+
+    if (payload.type === "partial" && typeof payload.text === "string") {
+      events.onPartial?.({
+        seq: typeof payload.seq === "number" ? payload.seq : 0,
+        text: payload.text,
+      });
+      return;
+    }
+
+    if (payload.type === "final" && typeof payload.text === "string") {
+      finalText = payload.text;
+      if (typeof payload.session_id === "string") {
+        finalSessionId = payload.session_id;
+        events.onSessionId?.(payload.session_id);
+      }
+      return;
+    }
+
+    if (payload.type === "done") {
+      resolveDoneIfPossible();
+      socket.close();
+      return;
+    }
+
+    if (payload.type === "error") {
+      const err = buildError(payload.error || "stt_ws_error", payload.retryable !== false);
+      rejectAll(err);
+      socket.close();
+    }
+  };
+
+  socket.onerror = () => {
+    rejectAll(buildError("stt_ws_transport_error", true));
+  };
+
+  socket.onclose = () => {
+    if (settled) return;
+    if (finalText && finalSessionId) {
+      resolveDoneIfPossible();
+      return;
+    }
+    rejectAll(buildError("stt_ws_closed_before_done", true));
+  };
+
+  return {
+    pushChunk: async (chunk: Blob) => {
+      if (stopped || chunk.size === 0) return;
+      await startPromise;
+      if (stopped) return;
+      const audio = await blobToBase64(chunk);
+      seq += 1;
+      await enqueueSend({
+        type: "chunk",
+        seq,
+        audio,
+      });
+    },
+    stop: async () => {
+      await startPromise;
+      if (!stopped) {
+        await enqueueSend({ type: "stop" });
+      }
+      return donePromise;
+    },
+    cancel: () => {
+      stopped = true;
+      try {
+        socket.close();
+      } catch {
+        // no-op
+      }
+    },
+  };
+};
 
 interface TtsCollectResult {
   chunks: Uint8Array<ArrayBuffer>[];

@@ -119,7 +119,7 @@ For non-React sites, use the `bulut/embed` entry point:
 | `projectId` | `string` | — | **Required.** Your Bulut project ID. |
 | `backendBaseUrl` | `string` | `"http://localhost:8000"` | Backend API URL. |
 | `model` | `string` | `"google/gemini-3-flash-preview:nitro"` | LLM model identifier. |
-| `voice` | `"zeynep" \| "ali"` | `"zeynep"` | Voice for TTS output. |
+| `voice` | `"alloy" \| "zeynep" \| "ali"` | `"alloy"` | Voice for TTS output. |
 | `baseColor` | `string` | `"#6C03C1"` | Primary theme colour (hex). Button, header, and user message bubbles will use this colour. |
 
 ## Embed API

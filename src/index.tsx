@@ -8,7 +8,7 @@ import {
 } from "./components/ChatWindow";
 import { COLORS } from "./styles/constants";
 
-export type BulutVoice = "zeynep" | "ali";
+export type BulutVoice = "alloy" | "zeynep" | "ali";
 
 export interface BulutOptions {
   containerId?: string;
@@ -34,7 +34,7 @@ const DEFAULT_CONFIG: BulutRuntimeConfig = {
   backendBaseUrl: "https://api.bulut.lu",
   projectId: "", // Must be provided
   model: DEFAULT_LLM_MODEL,
-  voice: "zeynep",
+  voice: "alloy",
   baseColor: COLORS.primary,
   agentName: DEFAULT_AGENT_NAME,
 };
@@ -156,7 +156,11 @@ const BulutWidget = ({ config }: BulutWidgetProps) => {
           baseColor: normalizeHexColor(remote.base_color || config.baseColor),
           model: remote.model || config.model,
           agentName: remote.agent_name || config.agentName,
-          voice: (remote.voice === "zeynep" || remote.voice === "ali" ? remote.voice : config.voice) as BulutVoice,
+          voice: (
+            remote.voice === "alloy" || remote.voice === "zeynep" || remote.voice === "ali"
+              ? remote.voice
+              : config.voice
+          ) as BulutVoice,
         };
         applyTheme(merged.baseColor);
         setLiveConfig(merged);
