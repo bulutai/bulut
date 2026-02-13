@@ -397,12 +397,15 @@ export const startSttWebSocketStream = (
   events: SttWsEvents = {},
 ): SttWsController => {
   const wsUrl = toWebSocketUrl(baseUrl, "/chat/stt/ws");
+  console.info("[Bulut] STT WS connecting to", wsUrl);
   const socket = new WebSocket(wsUrl);
   let seq = 0;
   let finalText = "";
   let finalSessionId = config.sessionId || "";
   let stopped = false;
   let settled = false;
+  // All chunk sends and the final stop are chained through sendQueue
+  // so the "stop" message always follows all enqueued chunks.
   let sendQueue: Promise<void> = Promise.resolve();
 
   let resolveStart: (() => void) | null = null;
@@ -422,6 +425,7 @@ export const startSttWebSocketStream = (
   const rejectAll = (error: Error & { retryable?: boolean }) => {
     if (settled) return;
     settled = true;
+    console.warn("[Bulut] STT WS rejected:", error.message);
     rejectStart?.(error);
     rejectDone?.(error);
   };
@@ -437,15 +441,8 @@ export const startSttWebSocketStream = (
     });
   };
 
-  const enqueueSend = (payload: Record<string, unknown>): Promise<void> => {
-    sendQueue = sendQueue.then(() => {
-      if (stopped || socket.readyState !== WebSocket.OPEN) return;
-      socket.send(JSON.stringify(payload));
-    });
-    return sendQueue;
-  };
-
   socket.onopen = () => {
+    console.info("[Bulut] STT WS connected, sending start");
     events.onRequestSent?.();
     socket.send(
       JSON.stringify({
@@ -463,6 +460,7 @@ export const startSttWebSocketStream = (
     if (!payload) return;
 
     if (payload.type === "start_ack" && typeof payload.session_id === "string") {
+      console.info("[Bulut] STT WS start_ack received, session:", payload.session_id);
       finalSessionId = payload.session_id;
       events.onSessionId?.(payload.session_id);
       resolveStart?.();
@@ -478,6 +476,7 @@ export const startSttWebSocketStream = (
     }
 
     if (payload.type === "final" && typeof payload.text === "string") {
+      console.info("[Bulut] STT WS final text received:", payload.text.slice(0, 80));
       finalText = payload.text;
       if (typeof payload.session_id === "string") {
         finalSessionId = payload.session_id;
@@ -487,23 +486,27 @@ export const startSttWebSocketStream = (
     }
 
     if (payload.type === "done") {
+      console.info("[Bulut] STT WS done");
       resolveDoneIfPossible();
       socket.close();
       return;
     }
 
     if (payload.type === "error") {
+      console.error("[Bulut] STT WS server error:", payload.error);
       const err = buildError(payload.error || "stt_ws_error", payload.retryable !== false);
       rejectAll(err);
       socket.close();
     }
   };
 
-  socket.onerror = () => {
+  socket.onerror = (ev) => {
+    console.error("[Bulut] STT WS transport error", ev);
     rejectAll(buildError("stt_ws_transport_error", true));
   };
 
-  socket.onclose = () => {
+  socket.onclose = (ev) => {
+    console.info("[Bulut] STT WS closed code=%d reason=%s", ev.code, ev.reason);
     if (settled) return;
     if (finalText && finalSessionId) {
       resolveDoneIfPossible();
@@ -513,23 +516,35 @@ export const startSttWebSocketStream = (
   };
 
   return {
-    pushChunk: async (chunk: Blob) => {
-      if (stopped || chunk.size === 0) return;
-      await startPromise;
-      if (stopped) return;
-      const audio = await blobToBase64(chunk);
-      seq += 1;
-      await enqueueSend({
-        type: "chunk",
-        seq,
-        audio,
+    pushChunk: (chunk: Blob): Promise<void> => {
+      if (stopped || chunk.size === 0) return Promise.resolve();
+      // Chain the entire operation (wait for connection, base64-encode,
+      // send) into sendQueue so that a later stop() is guaranteed to
+      // follow all previously-enqueued chunks.
+      sendQueue = sendQueue.then(async () => {
+        if (stopped) return;
+        await startPromise;
+        if (stopped) return;
+        const audio = await blobToBase64(chunk);
+        seq += 1;
+        if (stopped || socket.readyState !== WebSocket.OPEN) return;
+        console.debug("[Bulut] STT WS sending chunk seq=%d size=%d", seq, chunk.size);
+        socket.send(JSON.stringify({ type: "chunk", seq, audio }));
       });
+      return sendQueue;
     },
-    stop: async () => {
-      await startPromise;
-      if (!stopped) {
-        await enqueueSend({ type: "stop" });
-      }
+    stop: (): Promise<SttWsResult> => {
+      console.info("[Bulut] STT WS stop requested, draining %d pending chunks", seq);
+      // Chain after all pending pushChunk operations so the server
+      // always receives every chunk before the stop message.
+      sendQueue = sendQueue.then(async () => {
+        await startPromise;
+        if (stopped) return;
+        if (socket.readyState === WebSocket.OPEN) {
+          console.info("[Bulut] STT WS sending stop after seq=%d", seq);
+          socket.send(JSON.stringify({ type: "stop" }));
+        }
+      });
       return donePromise;
     },
     cancel: () => {

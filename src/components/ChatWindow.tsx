@@ -1373,12 +1373,13 @@ export const ChatWindow = ({
           }
         } catch (error) {
           console.warn(
-            `[Bulut] STT WS finalization failed, falling back to /chat/stt: ${error instanceof Error ? error.message : String(error)}`,
+            `[Bulut] STT WS finalization failed, falling back to HTTP POST /chat/stt: ${error instanceof Error ? error.message : String(error)}`,
           );
         } finally {
           clearLiveUserTranscriptionState();
         }
 
+        console.info("[Bulut] Using HTTP POST fallback for STT (streaming WS did not succeed)");
         setStatusOverride(STATUS_LABELS.thinking);
         await handleAudioBlob(blob);
       };
