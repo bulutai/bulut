@@ -8,10 +8,7 @@ import {
   BORDER_RADIUS,
   getContrastIconFilter,
 } from "../styles/constants";
-import {
-  closeIconContent,
-  microphoneIconContent,
-} from "../assets";
+import { closeIconContent, microphoneIconContent } from "../assets";
 import { SvgIcon } from "./SvgIcon";
 
 interface ChatButtonProps {
@@ -50,6 +47,7 @@ export const ChatButton = ({
     alignItems: "flex-end",
     gap: "8px",
     zIndex: "9999",
+    fontFamily: "\"Geist\", sans-serif",
   };
 
   const controlsRowStyle: { [key: string]: string } = {
@@ -97,7 +95,7 @@ export const ChatButton = ({
     height: "20px",
     borderRadius: "50%",
     border: "none",
-    background: "rgba(0,0,0,0.08)",
+    background: "transparent",
     cursor: "pointer",
     display: "flex",
     alignItems: "center",
@@ -156,17 +154,18 @@ export const ChatButton = ({
   return (
     <>
       <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Geist:wght@100..900&display=swap');
+
         .bulut-popup {
           background: #ffffff;
           color: ${COLORS.text};
           padding: 10px 14px;
           border-radius: 12px;
-          font-size: 13px;
+          font-size: 14px;
           line-height: 1.4;
           position: relative;
           overflow: visible;
           box-shadow: ${SHADOW};
-          border: 1px solid ${COLORS.border};
         }
         .bulut-popup-bubble {
           animation: bulut-bubbleIn 400ms ease-out;
@@ -239,7 +238,6 @@ export const ChatButton = ({
             }}
             onMouseLeave={(e) => {
               Object.assign(e.currentTarget.style, {
-
                 transform: "scale(1)",
               });
             }}

@@ -518,7 +518,7 @@ export const ChatWindow = ({
                       ? "Kaydırılıyor…"
                       : call.tool;
 
-            appendMessage(`🔧 ${toolLabel}`, false);
+            appendMessage(`${toolLabel}`, false);
             setMessages((prev) => {
               const last = prev[prev.length - 1];
               if (last && !last.isUser) {
@@ -779,7 +779,7 @@ export const ChatWindow = ({
                         ? "Kaydırılıyor…"
                         : call.tool;
 
-              appendMessage(`🔧 ${toolLabel}`, false);
+              appendMessage(`${toolLabel}`, false);
               // Mark the tool message
               setMessages((prev) => {
                 const last = prev[prev.length - 1];
@@ -1180,14 +1180,14 @@ export const ChatWindow = ({
     width: `${WINDOW_WIDTH}px`,
     maxHeight: `${WINDOW_HEIGHT}px`,
     backgroundColor: "hsla(0, 0%, 100%, 1)",
-    border: "1px solid rgba(0, 0, 0, 0.2)",
     borderRadius: BORDER_RADIUS.window,
     display: "flex",
     flexDirection: "column",
     overflow: "hidden",
     zIndex: "10000",
     animation: `slideIn ${TRANSITIONS.medium}`,
-    boxShadow: SHADOW
+    boxShadow: SHADOW,
+    fontFamily: "\"Geist\", sans-serif",
   };
 
   const headerStyle: { [key: string]: string } = {
@@ -1224,12 +1224,12 @@ export const ChatWindow = ({
   const messagesListStyle: { [key: string]: string } = {
     display: "flex",
     flexDirection: "column",
-    gap: "8px",
+    gap: "16px",
   };
 
-  const messageStyle = (isUser: boolean): { [key: string]: string } => ({
+  const messageStyle = (isUser: boolean): JSX.CSSProperties => ({
     maxWidth: "84%",
-    padding: isUser ? "9px 14px" : "9px 0px",
+    padding: isUser ? "9px 14px" : "0px 0px",
     borderRadius: BORDER_RADIUS.message,
     fontSize: "14px",
     lineHeight: "140%",
@@ -1237,7 +1237,7 @@ export const ChatWindow = ({
     whiteSpace: "pre-wrap",
     alignSelf: isUser ? "flex-end" : "flex-start",
     backgroundColor: isUser ? COLORS.messageUser : "",
-    color: isUser ? COLORS.messageUserText : "hsla(0, 0%, 10%, 0.8)",
+    color: isUser ? COLORS.messageUserText : "hsla(215, 100%, 5%, 1)",
   });
 
   const footerStyle: { [key: string]: string } = {
@@ -1278,19 +1278,18 @@ export const ChatWindow = ({
     textAlign: "right",
   };
 
-  const micBackgroundColor = COLORS.primary;
-
   const micFooterButtonStyle: { [key: string]: string } = {
     width: "37px",
     height: "37px",
     borderRadius: "999px",
+    background: "transparent",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     cursor: "pointer",
     color: "#ffffff",
-    border: "1px solid" + micBackgroundColor,
-    transition: `background-color ${TRANSITIONS.fast}, transform ${TRANSITIONS.fast}`,
+    border: "1px solid hsla(215, 100%, 5%, 0.5)",
+    transition: `transform ${TRANSITIONS.fast}`,
   };
 
   const disableMicControl = isBusy;
@@ -1375,15 +1374,15 @@ export const ChatWindow = ({
               style={
                 message.type === "tool"
                   ? {
-                      padding: "5px 12px",
-                      borderRadius: "8px",
-                      fontSize: "12px",
+                      padding: "9px 14px",
+                      fontSize: "14px",
                       lineHeight: "1.4",
-                      color: "#888",
-                      backgroundColor: "rgba(0, 0, 0, 0.03)",
+                      color: "hsla(215, 100%, 5%, 1)",
+                      fontWeight: 600,
+                      backgroundColor: "hsla(215, 100%, 5%, 0.05)",
+                      borderRadius: "10px",
                       alignSelf: "flex-start",
-                      maxWidth: "90%",
-                      fontStyle: "italic",
+                      maxWidth: "84%",
                     }
                   : messageStyle(message.isUser)
               }
@@ -1399,7 +1398,7 @@ export const ChatWindow = ({
           {statusText}
         </div>
 
-        <div style={footerActionsStyle}>
+        <div className='bebek' style={footerActionsStyle}>
           {isRecording ? (
             <span style={recordingTimerStyle}>
               {formatDurationMs(recordingDurationMs)}
@@ -1422,7 +1421,7 @@ export const ChatWindow = ({
           >
             <SvgIcon
               fill-opacity={"0"}
-              stroke={"black"}
+              stroke={"hsla(215, 100%, 5%, 1)"}
               src={microphoneIconContent}
               width={22}
             />

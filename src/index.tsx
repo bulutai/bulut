@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "preact/hooks";
+import "./globals.css";
 import { render } from "preact";
 import { ChatButton } from "./components/ChatButton";
 import {
@@ -106,6 +107,24 @@ const SESSION_ID_KEY = "bulut_session_id";
 const ACCESSIBILITY_MODE_KEY = "bulut_accessibility_mode_enabled";
 const VAD_THRESHOLD = 0.06;
 const SILENCE_DURATION_MS = 1000;
+const GEIST_FONT_FAMILY = "Geist";
+const GEIST_STYLESHEET_ID = "bulut-geist-font-stylesheet";
+const GEIST_STYLESHEET_URL =
+  "https://fonts.googleapis.com/css2?family=Geist:wght@100..900&display=swap";
+
+const ensureGeistStylesheet = (): void => {
+  if (typeof document === "undefined") {
+    return;
+  }
+  if (document.getElementById(GEIST_STYLESHEET_ID)) {
+    return;
+  }
+  const link = document.createElement("link");
+  link.id = GEIST_STYLESHEET_ID;
+  link.rel = "stylesheet";
+  link.href = GEIST_STYLESHEET_URL;
+  document.head.appendChild(link);
+};
 
 interface StoredMessage {
   id: number;
@@ -188,7 +207,9 @@ const BulutWidget = ({ config }: BulutWidgetProps) => {
       return;
     }
     if (isOpen) return;
-    if (typeof localStorage !== "undefined" && localStorage.getItem("bulut_bubble_shown") === "true") return;
+    if (typeof localStorage !== "undefined") {
+      if (localStorage.getItem("bulut_bubble_shown") === "true") return;
+    }
 
     setShowBubble(true);
     const timer = setTimeout(() => {
@@ -213,7 +234,7 @@ const BulutWidget = ({ config }: BulutWidgetProps) => {
       vadIntervalRef.current = null;
     }
     if (audioContextRef.current) {
-      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current.close().catch(() => { });
       audioContextRef.current = null;
     }
     if (streamRef.current) {
@@ -554,19 +575,11 @@ const BulutWidget = ({ config }: BulutWidgetProps) => {
 };
 
 const SHADOW_STYLE = `
-  @font-face {
-    font-family: "Clash Display";
-    src: url("https://bulut.lu/clash-display.woff2") format("woff2");
-    font-style: normal;
-    font-weight: 400;
-    font-display: swap;
-  }
-
   :host {
     all: initial;
     contain: layout style paint;
-    color: #111111;
-    font-family: "Clash Display", sans-serif;
+    font-family: "${GEIST_FONT_FAMILY}", sans-serif;
+    color: hsla(215, 100%, 5%, 1);
     font-size: 16px;
     line-height: 1.4;
     -webkit-font-smoothing: antialiased;
@@ -576,13 +589,13 @@ const SHADOW_STYLE = `
   #bulut-shadow-mount {
     all: initial;
     color: inherit;
-    font-family: inherit;
+    font-family: "${GEIST_FONT_FAMILY}", sans-serif;
     font-size: inherit;
     line-height: inherit;
   }
 
   #bulut-shadow-mount * {
-    font-family: inherit;
+    font-family: "${GEIST_FONT_FAMILY}", sans-serif !important;
     color: inherit;
   }
 
@@ -606,6 +619,8 @@ export const init = (options: BulutOptions = {}) => {
     console.warn("Bulut is already initialized");
     return;
   }
+
+  ensureGeistStylesheet();
 
   const runtimeConfig = resolveRuntimeConfig(options);
   applyTheme(runtimeConfig.baseColor);

@@ -12,8 +12,8 @@ export const COLORS = {
   primary: "#006BF8",
   primaryHover: "#0056C7",
   background: "#ffffff",
-  text: "#1F1F1F",
-  textSecondary: "#1F1F1F",
+  text: "hsla(215, 100%, 5%, 1)",
+  textSecondary: "hsla(215, 100%, 5%, 1)",
   border: "#e5e7eb",
   messageBot: "",
   messageUser: "#6C03C1",
@@ -23,7 +23,7 @@ export const COLORS = {
 const normalizeHexColor = (hex: string): string => {
   const trimmed = hex.trim();
   if (!/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(trimmed)) {
-    return "#000000";
+    return "hsla(215, 100%, 5%, 1)";
   }
   if (trimmed.length === 4) {
     const r = trimmed[1];
@@ -49,11 +49,11 @@ export const getContrastIconFilter = (backgroundHex: string): string => {
 export const BORDER_RADIUS = {
   button: '50%',
   window: '17px',
-  message: '14px'
+  message: '10px'
 };
 
 // Shadows
-export const SHADOW = "0 0 15px rgba(0, 0, 0, 0.15)";
+export const SHADOW = "0 0 15px hsla(215, 100%, 5%, 0.15)";
 
 // Transitions
 export const TRANSITIONS = {
