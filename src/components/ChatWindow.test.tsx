@@ -92,7 +92,7 @@ describe("status and timer helpers", () => {
         isPlayingAudio: false,
         isRunningTools: false,
       }),
-    ).toBe("Metne dönüştürülüyor");
+    ).toBe("Düşünüyorum");
 
     expect(
       resolveStatusText({
@@ -104,7 +104,7 @@ describe("status and timer helpers", () => {
         isPlayingAudio: false,
         isRunningTools: false,
       }),
-    ).toBe("Düşünüyor");
+    ).toBe("Düşünüyorum");
 
     expect(
       resolveStatusText({
@@ -116,7 +116,7 @@ describe("status and timer helpers", () => {
         isPlayingAudio: false,
         isRunningTools: true,
       }),
-    ).toBe("Araç çalıştırılıyor");
+    ).toBe("Siteyle ilgileniyorum");
   });
 
   it("auto-listens when accessibility mode or expects_reply is true", () => {

@@ -103,7 +103,7 @@ const STATUS_LABELS = {
   accessibilityActive: "Erişilebilirlik Aktif",
   transcribing: "Düşünüyorum",
   thinking: "Düşünüyorum",
-  playingAudio: "",
+  playingAudio: ".",
   runningTools: "Siteyle ilgileniyorum",
 } as const;
 
