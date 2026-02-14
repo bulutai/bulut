@@ -2210,7 +2210,7 @@ export const ChatWindow = ({
                   aria-hidden="true"
                   width={22}
                   height={22}
-                  style={{ color: "hsla(215, 100%, 5%, 1)" }}
+                  style={{ color: "hsla(215, 100%, 5%, 1)"}}
                 />
               ) : (
                 <SvgIcon

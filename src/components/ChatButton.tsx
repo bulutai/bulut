@@ -144,7 +144,7 @@ export const ChatButton = ({
           }}
           aria-label="Kapat"
         >
-          <SvgIcon src={xMarkIconContent} aria-hidden="true" width={14} height={14} strokeWidth={3} />
+          <SvgIcon src={xMarkIconContent} aria-hidden="true" width={16} height={16} />
         </button>
       )}
 
@@ -265,7 +265,6 @@ export const ChatButton = ({
               src={mainIconSrc}
               aria-hidden="true"
               style={iconStyle}
-              strokeWidth={2.25}
             />
           </button>
         </div>

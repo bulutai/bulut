@@ -84,6 +84,8 @@ export function SvgIcon({
                 display: "inline-block",
                 verticalAlign: "middle",
                 flexShrink: 0,
+                fill: "none",
+                stroke: "currentColor",
                 ...style,
             }}
             xmlns="http://www.w3.org/2000/svg"
