@@ -119,11 +119,17 @@ describe("status and timer helpers", () => {
     ).toBe("Araç çalıştırılıyor");
   });
 
-  it("auto-listens only in accessibility mode after audio", () => {
-    expect(shouldAutoListenAfterAudio(true, false, false)).toBe(true);
-    expect(shouldAutoListenAfterAudio(false, false, false)).toBe(false);
-    expect(shouldAutoListenAfterAudio(true, true, false)).toBe(false);
-    expect(shouldAutoListenAfterAudio(true, false, true)).toBe(false);
+  it("auto-listens when accessibility mode or expects_reply is true", () => {
+    // accessibility mode on, expects reply, not recording, not busy
+    expect(shouldAutoListenAfterAudio(true, true, false, false)).toBe(true);
+    // accessibility off, expects reply true → should auto-listen
+    expect(shouldAutoListenAfterAudio(false, true, false, false)).toBe(true);
+    // accessibility off, expects reply false → should NOT auto-listen
+    expect(shouldAutoListenAfterAudio(false, false, false, false)).toBe(false);
+    // already recording → no
+    expect(shouldAutoListenAfterAudio(true, true, true, false)).toBe(false);
+    // busy → no
+    expect(shouldAutoListenAfterAudio(true, true, false, true)).toBe(false);
   });
 
   it("requires 1.5 second persistent speech only in accessibility mode", () => {

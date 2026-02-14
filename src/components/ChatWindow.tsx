@@ -98,7 +98,7 @@ export const HOLD_THRESHOLD_MS = 250;
 const STATUS_LABELS = {
   ready: "Hazır",
   loading: "Bir saniye",
-  micInitializing: "Bir saniye",
+  micInitializing: "Mikrofonu hazırlıyorum",
   listening: "Sizi dinliyorum",
   accessibilityActive: "Erişilebilirlik Aktif",
   transcribing: "Düşünüyorum",
@@ -216,9 +216,10 @@ export const resolveAssistantPayload = (
 
 export const shouldAutoListenAfterAudio = (
   accessibilityMode: boolean,
+  expectsReply: boolean,
   isRecording: boolean,
   isBusy: boolean,
-): boolean => accessibilityMode && !isRecording && !isBusy;
+): boolean => (accessibilityMode || expectsReply) && !isRecording && !isBusy;
 
 export const shouldAcceptVadSpeech = (
   speechDurationMs: number,
@@ -308,6 +309,7 @@ export const ChatWindow = ({
   const [isRenderingAudio, setIsRenderingAudio] = useState(false);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [isRunningTools, setIsRunningTools] = useState(false);
+  const [isMicPending, setIsMicPending] = useState(false);
   const [recordingDurationMs, setRecordingDurationMs] = useState(0);
   const [statusOverride, setStatusOverride] = useState<string | null>(null);
   const statusFlags: StatusFlags = {
@@ -376,6 +378,7 @@ export const ChatWindow = ({
   const liveTranscriptionMessageIdRef = useRef<number | null>(null);
   const liveTranscriptionTextRef = useRef("");
   const autoListenSuppressedRef = useRef(false);
+  const expectsReplyRef = useRef(true);
   const requestEpochRef = useRef(0);
   const sttSendCuePlayedRef = useRef(false);
 
@@ -675,9 +678,10 @@ export const ChatWindow = ({
             );
           }
         },
-        onAssistantDone: (assistantText) => {
+        onAssistantDone: (assistantText, expectsReply) => {
           if (!isCurrentRequestEpoch(requestEpoch)) return;
           playSfx("completed");
+          expectsReplyRef.current = expectsReply !== false;
           setStatusOverride(null);
           setIsThinking(false);
           setIsRenderingAudio(true);
@@ -757,12 +761,15 @@ export const ChatWindow = ({
           !autoListenSuppressedRef.current &&
           shouldAutoListenAfterAudio(
             accessibilityMode,
+            expectsReplyRef.current,
             isRecordingRef.current,
             false,
           )
         ) {
           void startRecording("vad");
         }
+        // Reset for next turn
+        expectsReplyRef.current = true;
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -924,6 +931,7 @@ export const ChatWindow = ({
       !autoListenSuppressedRef.current &&
       shouldAutoListenAfterAudio(
         accessibilityMode,
+        expectsReplyRef.current,
         isRecordingRef.current,
         false,
       )
@@ -931,6 +939,8 @@ export const ChatWindow = ({
       console.info("[Bulut] chat-window auto-listen trigger after stream completion");
       void startRecording("vad");
     }
+    // Reset for next turn
+    expectsReplyRef.current = true;
   };
 
   const runAgentForUserText = async (userText: string) => {
@@ -1024,9 +1034,10 @@ export const ChatWindow = ({
               );
             }
           },
-          onAssistantDone: (assistantText) => {
+          onAssistantDone: (assistantText, expectsReply) => {
             if (!isCurrentRequestEpoch(requestEpoch)) return;
             playSfx("completed");
+            expectsReplyRef.current = expectsReply !== false;
             awaitingAssistantResponseRef.current = false;
             setStatusOverride(null);
             setIsThinking(false);
@@ -1226,9 +1237,10 @@ export const ChatWindow = ({
               );
             }
           },
-          onAssistantDone: (assistantText) => {
+          onAssistantDone: (assistantText, expectsReply) => {
             if (!isCurrentRequestEpoch(requestEpoch)) return;
             playSfx("completed");
+            expectsReplyRef.current = expectsReply !== false;
             awaitingAssistantResponseRef.current = false;
             setStatusOverride(null);
             setIsThinking(false);
@@ -1413,15 +1425,18 @@ export const ChatWindow = ({
     }
 
     setStatusOverride(STATUS_LABELS.micInitializing);
+    setIsMicPending(true);
 
     if (!navigator.mediaDevices?.getUserMedia) {
       setStatusOverride(null);
+      setIsMicPending(false);
       appendMessage("Bu tarayıcıda mikrofon kullanılamıyor.", false);
       return;
     }
 
     if (typeof MediaRecorder === "undefined") {
       setStatusOverride(null);
+      setIsMicPending(false);
       appendMessage("Bu tarayıcıda MediaRecorder desteklenmiyor.", false);
       return;
     }
@@ -1613,6 +1628,7 @@ export const ChatWindow = ({
         setStatusOverride(null);
       }
       startRecordingPendingRef.current = false;
+      setIsMicPending(false);
     }
   };
 
@@ -1940,6 +1956,7 @@ export const ChatWindow = ({
 
   const isVadRecording = isRecording && recordingModeRef.current === "vad";
   const showStopButton = isBusy && !isRecording;
+  const hideMicButton = isMicPending && !isRecording;
   const disableMicControl = isBusy;
 
   return (
@@ -2170,7 +2187,7 @@ export const ChatWindow = ({
                 style={{ color: "hsla(215, 100%, 5%, 1)" }}
               />
             </button>
-          ) : (
+          ) : hideMicButton ? null : (
             <button
               type="button"
               className="bulut-footer-btn"

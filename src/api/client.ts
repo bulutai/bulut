@@ -874,7 +874,7 @@ export interface AgentVoiceChatEvents {
     user_text: string;
   }) => void;
   onAssistantDelta?: (delta: string) => void;
-  onAssistantDone?: (assistantText: string) => void;
+  onAssistantDone?: (assistantText: string, expectsReply?: boolean) => void;
   onAudioStateChange?: (state: AudioStreamState) => void;
   onError?: (error: string) => void;
   /** Called when the agent requests tool execution on the frontend. */
@@ -1109,7 +1109,8 @@ export const agentVoiceChatStream = (
 
           if (msgType === "agent_done") {
             finalReply = (data.final_reply as string) || "";
-            events.onAssistantDone?.(finalReply);
+            const replyExpectsReply = data.expects_reply !== false;
+            events.onAssistantDone?.(finalReply, replyExpectsReply);
             if (typeof data.session_id === "string") {
               events.onSessionId?.(data.session_id as string);
             }
@@ -1368,7 +1369,8 @@ export const agentTextChatStream = (
 
           if (msgType === "agent_done") {
             finalReply = (data.final_reply as string) || "";
-            events.onAssistantDone?.(finalReply);
+            const replyExpectsReply = data.expects_reply !== false;
+            events.onAssistantDone?.(finalReply, replyExpectsReply);
             if (typeof data.session_id === "string") {
               events.onSessionId?.(data.session_id as string);
             }
@@ -1620,7 +1622,8 @@ export const agentResumeStream = (
 
           if (msgType === "agent_done") {
             finalReply = (data.final_reply as string) || "";
-            events.onAssistantDone?.(finalReply);
+            const replyExpectsReply = data.expects_reply !== false;
+            events.onAssistantDone?.(finalReply, replyExpectsReply);
             if (typeof data.session_id === "string") {
               events.onSessionId?.(data.session_id as string);
             }
