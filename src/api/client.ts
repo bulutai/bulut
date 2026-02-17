@@ -5,13 +5,6 @@ import {
   type PendingAgentResume,
 } from "../agent/tools";
 
-export type ChatRole = "system" | "user" | "assistant";
-
-export interface ChatMessage {
-  role: ChatRole;
-  content: string;
-}
-
 interface ApiErrorBody {
   detail?: string;
   error?: string;
